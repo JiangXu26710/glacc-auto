@@ -1,0 +1,218 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:GlaccAuto.Gui.ViewModels"
+             xmlns:controls="using:GlaccAuto.Gui.Controls"
+             x:Class="GlaccAuto.Gui.Views.HomePage"
+             x:DataType="vm:MainWindowViewModel">
+  <!-- 竖排版式：单一内容列垂直居中，剩余空间均匀分配上下 -->
+  <Grid>
+    <StackPanel Classes="pageContent" VerticalAlignment="Center" Margin="24,16,24,24"
+                MaxWidth="584" Spacing="16">
+
+      <!-- 账号行：当前账号为视觉焦点；仅一个账号时无任何多账号线索 -->
+      <Button Classes="accountBtn" IsVisible="{Binding HasMultipleAccounts}"
+              HorizontalAlignment="Left" VerticalContentAlignment="Center">
+        <StackPanel Orientation="Horizontal" Spacing="10">
+          <Border Width="32" Height="32" CornerRadius="16"
+                  Background="{DynamicResource AccentSoftBrush}">
+            <TextBlock FontFamily="{DynamicResource FontIcons}" Text="&#xE77B;" FontSize="16"
+                       Foreground="{DynamicResource AccentBrush}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <TextBlock Text="{Binding AccountName}" Classes="cardTitleStrong"
+                     VerticalAlignment="Center"/>
+          <TextBlock FontFamily="{DynamicResource FontIcons}" Text="&#xE70D;" FontSize="12"
+                     Foreground="{DynamicResource TextTertiaryBrush}"
+                     VerticalAlignment="Center"/>
+        </StackPanel>
+        <Button.Flyout>
+          <Flyout Placement="BottomEdgeAlignedLeft">
+            <StackPanel MinWidth="260" Spacing="4">
+              <TextBlock Text="切换账号" Classes="cardCaption" Margin="14,4,14,10"/>
+              <ItemsControl ItemsSource="{Binding Accounts}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Button Classes="accountMenuItem"
+                            Command="{Binding $parent[ItemsControl].((vm:MainWindowViewModel)DataContext).SelectAccountCommand}"
+                            CommandParameter="{Binding}">
+                      <TextBlock Text="{Binding}"/>
+                    </Button>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Border Height="1" Background="{DynamicResource DividerBrush}" Margin="0,4"/>
+              <Button Classes="accountMenuItem" Command="{Binding AddAccountCommand}">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <TextBlock FontFamily="{DynamicResource FontIcons}" Text="&#xE710;" FontSize="14"
+                             VerticalAlignment="Center"/>
+                  <TextBlock Text="添加账号"/>
+                </StackPanel>
+              </Button>
+            </StackPanel>
+          </Flyout>
+        </Button.Flyout>
+      </Button>
+
+      <!-- 单账号已登录：点击账号行切换 显示/隐藏 完整手机号 -->
+      <StackPanel Orientation="Horizontal" Spacing="12"
+                  IsVisible="{Binding IsLoggedIn}"
+                  Cursor="Hand" Background="Transparent"
+                  Tapped="AccountRow_OnTapped">
+        <Border Width="32" Height="32" CornerRadius="16"
+                Background="{DynamicResource AccentSoftBrush}">
+          <TextBlock FontFamily="{DynamicResource FontIcons}" Text="&#xE77B;" FontSize="16"
+                     Foreground="{DynamicResource AccentBrush}"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <StackPanel Spacing="0" VerticalAlignment="Center">
+          <TextBlock Text="{Binding AccountName}" Classes="cardTitleStrong"/>
+          <TextBlock Text="{Binding UserIdText}" Classes="cardCaption"/>
+        </StackPanel>
+      </StackPanel>
+
+      <!-- 未登录：点击进入登录引导 -->
+      <StackPanel Orientation="Horizontal" Spacing="12"
+                  IsVisible="{Binding !IsLoggedIn}"
+                  Cursor="Hand" Background="Transparent"
+                  Tapped="LoginEntry_OnTapped">
+        <Border Width="32" Height="32" CornerRadius="16"
+                Background="{DynamicResource AccentSoftBrush}">
+          <TextBlock FontFamily="{DynamicResource FontIcons}" Text="&#xE77B;" FontSize="16"
+                     Foreground="{DynamicResource AccentBrush}"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <StackPanel Spacing="0" VerticalAlignment="Center">
+          <TextBlock Text="未登录" Classes="cardTitleStrong"/>
+          <TextBlock Text="点击登录账号" Classes="cardCaption"/>
+        </StackPanel>
+      </StackPanel>
+
+      <!-- 余额卡（Hero）：版式化数字 + 单位小字，右侧时钟水印增加层次 -->
+      <Border Classes="card" Padding="24">
+        <Panel>
+          <TextBlock FontFamily="{DynamicResource FontIcons}" Text="&#xE823;" FontSize="76"
+                     Foreground="{DynamicResource AccentBrush}" Opacity="0.07"
+                     HorizontalAlignment="Right" VerticalAlignment="Center"/>
+          <StackPanel Spacing="6">
+            <TextBlock Text="可用时长" Classes="cardCaption"/>
+            <StackPanel Orientation="Horizontal" Spacing="0" Margin="0,4,0,2">
+              <controls:AnimatedTextBlock Text="{Binding BalanceHoursText}"
+                                          FontFamily="{DynamicResource FontDisplay}"
+                                          FontSize="44" FontWeight="SemiBold"
+                                          Foreground="{DynamicResource TextPrimaryBrush}"/>
+              <TextBlock Text="时" FontSize="14"
+                         Foreground="{DynamicResource TextSecondaryBrush}"
+                         VerticalAlignment="Bottom" Margin="5,0,12,10"/>
+              <controls:AnimatedTextBlock Text="{Binding BalanceMinutesText}"
+                                          FontFamily="{DynamicResource FontDisplay}"
+                                          FontSize="44" FontWeight="SemiBold"
+                                          Foreground="{DynamicResource TextPrimaryBrush}"/>
+              <TextBlock Text="分" FontSize="14"
+                         Foreground="{DynamicResource TextSecondaryBrush}"
+                         VerticalAlignment="Bottom" Margin="5,0,0,10"/>
+            </StackPanel>
+          </StackPanel>
+        </Panel>
+      </Border>
+
+      <!-- 任务进度卡 -->
+      <Border Classes="card" Padding="22">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,16,0">
+              <TextBlock Text="今日任务 · 点广告得时长" Classes="cardTitleStrong"/>
+              <TextBlock Text="{Binding StageText}" Classes="cardCaption"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="5"
+                        VerticalAlignment="Center">
+              <controls:AnimatedTextBlock Text="{Binding ProgressCurrentText}"
+                                          FontFamily="{DynamicResource FontDisplay}"
+                                          FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"
+                                          Foreground="{DynamicResource TextPrimaryBrush}"/>
+              <TextBlock Text="/" FontFamily="{DynamicResource FontDisplay}"
+                         FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"
+                         Margin="0,4,0,0"
+                         Foreground="{DynamicResource TextTertiaryBrush}"/>
+              <controls:AnimatedTextBlock Text="{Binding ProgressTotalText}"
+                                          FontFamily="{DynamicResource FontDisplay}"
+                                          FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"
+                                          Foreground="{DynamicResource TextPrimaryBrush}"/>
+            </StackPanel>
+          </Grid>
+          <controls:SegmentedProgressBar SegmentSizes="{Binding SegmentSizes}"
+                                         Completed="{Binding ClaimIndex}"/>
+        </StackPanel>
+      </Border>
+
+      <!-- 领取按钮：各账号共用，全宽主操作（60 高 / 22 号字） -->
+      <Button Classes="accent" Command="{Binding StartCommand}"
+              IsEnabled="{Binding ButtonEnabled}"
+              HorizontalAlignment="Stretch" Height="48"
+              Padding="20,0" HorizontalContentAlignment="Center"
+              VerticalContentAlignment="Center" FontSize="18" Margin="0,8,0,0">
+        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+          <TextBlock Classes="spinner" Text="&#xE72C;" FontSize="18"
+                     FontFamily="{DynamicResource FontIcons}"
+                     VerticalAlignment="Center"
+                     IsVisible="{Binding SpinnerVisible}"/>
+          <TextBlock Text="{Binding ButtonText}" VerticalAlignment="Center"/>
+        </StackPanel>
+      </Button>
+
+      <!-- 演示辅助，接入真实业务后移除 -->
+      <Button Classes="textBtn" Content="重置演示数据"
+              Command="{Binding ResetDemoCommand}"
+              IsVisible="{Binding CanReset}"
+              HorizontalAlignment="Center"/>
+    </StackPanel>
+
+    <!-- 登录对话框：手机号 → 短信验证码两步；演示模式，任意非空验证码即可登录 -->
+    <Panel ZIndex="10" IsVisible="{Binding ShowLoginDialog}">
+      <Border Background="{DynamicResource SmokeBrush}" PointerPressed="OnLoginScrimPressed"/>
+      <Border Classes="dialog" Width="416"
+              HorizontalAlignment="Center" VerticalAlignment="Center">
+        <StackPanel>
+          <!-- 第一步：手机号 -->
+          <StackPanel IsVisible="{Binding !LoginCodeStep}">
+            <TextBlock Text="登录账号" FontSize="20" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextPrimaryBrush}"/>
+            <TextBlock Text="输入手机号，接收短信验证码"
+                       FontSize="14" Margin="0,8,0,0" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+            <TextBox Text="{Binding PhoneInput}" Watermark="手机号" MaxLength="11"
+                     Margin="0,20,0,0"/>
+            <StackPanel Orientation="Horizontal" Spacing="8"
+                        HorizontalAlignment="Right" Margin="0,24,0,0">
+              <Button Content="取消" MinWidth="120" Height="32" FontSize="14"
+                      Command="{Binding CancelLoginCommand}" IsCancel="True"/>
+              <Button Content="发送验证码" MinWidth="120" Height="32" FontSize="14" Classes="accent"
+                      Command="{Binding SendCodeCommand}" IsEnabled="{Binding CanResend}" IsDefault="True"/>
+            </StackPanel>
+          </StackPanel>
+
+          <!-- 第二步：验证码 -->
+          <StackPanel IsVisible="{Binding LoginCodeStep}">
+            <TextBlock Text="输入验证码" FontSize="20" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextPrimaryBrush}"/>
+            <TextBlock Text="{Binding SentToText}"
+                       FontSize="14" Margin="0,8,0,0" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+            <TextBox Text="{Binding CodeInput, UpdateSourceTrigger=PropertyChanged}"
+                     Watermark="6 位验证码" MaxLength="6" Margin="0,20,0,0"/>
+            <Button Classes="textBtn" Content="{Binding ResendText}"
+                    Command="{Binding SendCodeCommand}" IsEnabled="{Binding CanResend}"
+                    HorizontalAlignment="Left" Margin="0,10,0,0"/>
+            <StackPanel Orientation="Horizontal" Spacing="8"
+                        HorizontalAlignment="Right" Margin="0,24,0,0">
+              <Button Content="返回" MinWidth="120" Height="32" FontSize="14"
+                      Command="{Binding BackToPhoneCommand}"/>
+              <Button Content="登录" MinWidth="120" Height="32" FontSize="14" Classes="accent"
+                      Command="{Binding ConfirmLoginCommand}" IsEnabled="{Binding HasCodeInput}"
+                      IsDefault="True"/>
+            </StackPanel>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Panel>
+  </Grid>
+</UserControl>

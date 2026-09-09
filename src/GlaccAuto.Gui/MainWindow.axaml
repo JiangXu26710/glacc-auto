@@ -1,0 +1,108 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:GlaccAuto.Gui.ViewModels"
+        xmlns:views="using:GlaccAuto.Gui.Views"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="520"
+        x:Class="GlaccAuto.Gui.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="glacc-auto"
+        Width="800" Height="520" MinWidth="704" MinHeight="480"
+        WindowStartupLocation="CenterScreen"
+        FontFamily="{DynamicResource FontMain}"
+        Background="{DynamicResource AppBgBrush}">
+
+  <!-- 页面模板：按 ViewModel 类型解析视图 -->
+  <Window.DataTemplates>
+    <DataTemplate DataType="{x:Type vm:MainWindowViewModel}">
+      <views:HomePage/>
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
+      <views:SettingsPage/>
+    </DataTemplate>
+  </Window.DataTemplates>
+
+  <!-- 缩放宿主：LayoutTransform 布局级缩放（文字清晰），基准 125% = 当前设计 -->
+  <LayoutTransformControl x:Name="ScaleHost">
+  <Grid RowDefinitions="32,*">
+
+    <!-- 标题栏：32px（系统原生规格），右侧预留系统窗口按钮区 -->
+    <Grid x:Name="TitleBar" Grid.Row="0" ColumnDefinitions="Auto,*,Auto"
+          Background="Transparent" VerticalAlignment="Stretch">
+      <TextBlock Grid.Column="0" Margin="12,0,0,0" VerticalAlignment="Center"
+                 Classes="titleCaption" Text="{Binding TitleText}"/>
+    </Grid>
+
+    <!-- 主体：左侧 64px NavigationView 导航栏 + 内容区（页面切换带入场动画） -->
+    <Grid Grid.Row="1" ColumnDefinitions="52,*">
+      <Border Grid.Column="0" VerticalAlignment="Stretch">
+        <StackPanel Margin="8,12,8,0" Spacing="6">
+          <Button Classes="navBtn" ToolTip.Tip="首页"
+                  Command="{Binding OpenHomeCommand}"
+                  Classes.selected="{Binding !IsSettingsOpen}">
+            <Grid>
+              <Border Classes="navPill"/>
+              <TextBlock Classes="navIcon" Text="&#xE80F;"/>
+            </Grid>
+          </Button>
+          <Button Classes="navBtn" ToolTip.Tip="设置"
+                  Command="{Binding OpenSettingsCommand}"
+                  Classes.selected="{Binding IsSettingsOpen}">
+            <Grid>
+              <Border Classes="navPill"/>
+              <TextBlock Classes="navIcon" Text="&#xE713;"/>
+            </Grid>
+          </Button>
+        </StackPanel>
+      </Border>
+
+      <!-- 页面区：CurrentPage 变化时视图重建，触发 pageContent 入场动画 -->
+      <ContentControl Grid.Column="1" Content="{Binding CurrentPage}"/>
+    </Grid>
+
+    <!-- 领取中退出二次确认：Smoke 遮罩 + ContentDialog 布局（按钮水平、主操作右侧） -->
+    <Panel Grid.RowSpan="2" ZIndex="10" IsVisible="{Binding ShowExitConfirm}">
+      <Border Background="{DynamicResource SmokeBrush}" PointerPressed="OnScrimPressed"/>
+      <Border Classes="dialog" Width="416"
+              HorizontalAlignment="Center" VerticalAlignment="Center">
+        <StackPanel>
+          <TextBlock Text="正在领取" FontSize="20" FontWeight="SemiBold"
+                     Foreground="{DynamicResource TextPrimaryBrush}"/>
+          <TextBlock Text="退出将中断本次领取，确定要退出吗？"
+                     FontSize="14" Margin="0,8,0,0" TextWrapping="Wrap"
+                     Foreground="{DynamicResource TextSecondaryBrush}"/>
+          <StackPanel Orientation="Horizontal" Spacing="8"
+                      HorizontalAlignment="Right" Margin="0,24,0,0">
+            <Button Content="继续领取" MinWidth="120" Height="32" FontSize="14"
+                    Command="{Binding CancelExitCommand}" IsDefault="True" IsCancel="True"/>
+            <Button Content="确认退出" MinWidth="120" Height="32" FontSize="14" Classes="accent"
+                    Command="{Binding ConfirmExitCommand}"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Panel>
+      <!-- 缩放保护确认：倒计时结束自动还原（对齐官方"保留这些显示设置？"） -->
+      <Panel Grid.RowSpan="2" ZIndex="20" x:Name="ScaleConfirmHost" IsVisible="False">
+        <Border Background="{DynamicResource SmokeBrush}"/>
+        <Border Classes="dialog" Width="416"
+                HorizontalAlignment="Center" VerticalAlignment="Center">
+          <StackPanel>
+            <TextBlock Text="保留这些显示设置？" FontSize="20" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TextPrimaryBrush}"/>
+            <TextBlock x:Name="ScaleCountdownText"
+                       FontSize="14" Margin="0,8,0,0" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+            <StackPanel Orientation="Horizontal" Spacing="8"
+                        HorizontalAlignment="Right" Margin="0,24,0,0">
+              <Button x:Name="ScaleRevertBtn" Content="恢复" MinWidth="120" Height="32" FontSize="14"
+                      Click="OnScaleRevertClick"/>
+              <Button x:Name="ScaleKeepBtn" Content="保留" MinWidth="120" Height="32" FontSize="14"
+                      Classes="accent" Click="OnScaleKeepClick" IsDefault="True"/>
+            </StackPanel>
+          </StackPanel>
+        </Border>
+      </Panel>
+  </Grid>
+  </LayoutTransformControl>
+</Window>

@@ -1,0 +1,150 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:GlaccAuto.Gui.ViewModels"
+             x:Class="GlaccAuto.Gui.Views.SettingsPage"
+             x:DataType="vm:SettingsViewModel">
+
+  <!-- Win11 设置官方模式：一行一独立卡片；定时领取 = 行头卡片 + 独立子卡片
+       （两段式浮出动画由 code-behind 显式 Animation 驱动；展开时两卡连为一体） -->
+
+  <!-- 隐藏 ToggleSwitch 的 On/Off 内容演示器：空内容仍随 ON/OFF 状态占位（宽差 ~23DIP），导致箭头位置漂移 -->
+  <UserControl.Styles>
+    <Style Selector="ToggleSwitch /template/ ContentPresenter#PART_OffContentPresenter">
+      <Setter Property="IsVisible" Value="False"/>
+    </Style>
+    <Style Selector="ToggleSwitch /template/ ContentPresenter#PART_OnContentPresenter">
+      <Setter Property="IsVisible" Value="False"/>
+    </Style>
+  </UserControl.Styles>
+
+  <!-- 滚动条常驻：避免展开/收起时滚动条出现/消失导致内容宽度跳变（箭头等右对齐元素左移） -->
+  <ScrollViewer VerticalScrollBarVisibility="Visible">
+    <StackPanel Classes="pageContent" Margin="24,16,40,24" Spacing="24" MaxWidth="832" HorizontalAlignment="Center">
+
+      <!-- 分组：领取（一行一卡） -->
+      <StackPanel Spacing="4">
+        <TextBlock Text="领取" Classes="sectionHeader" Margin="0,0,0,8"/>
+
+        <!-- 领取间隔：独立行卡片 -->
+        <Border Classes="card" Padding="0">
+          <Grid ColumnDefinitions="*,Auto" Margin="16,12">
+            <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,16,0">
+              <TextBlock Text="领取间隔" Classes="cardTitleStrong"/>
+              <TextBlock Text="每次领取动作的间隔，将在此区间内随机取值" Classes="cardCaption"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10"
+                        VerticalAlignment="Center">
+              <TextBox Text="{Binding IntervalMin, UpdateSourceTrigger=LostFocus}"
+                       Width="76" LostFocus="IntervalBox_OnLostFocus"/>
+              <TextBlock Text="~" VerticalAlignment="Center"
+                         Foreground="{DynamicResource TextTertiaryBrush}"/>
+              <TextBox Text="{Binding IntervalMax, UpdateSourceTrigger=LostFocus}"
+                       Width="76" LostFocus="IntervalBox_OnLostFocus"/>
+              <TextBlock Text="秒" VerticalAlignment="Center"
+                         Foreground="{DynamicResource TextSecondaryBrush}"/>
+            </StackPanel>
+          </Grid>
+        </Border>
+
+        <!-- 定时领取：行头卡片（高度固定）；展开时与子卡片连为一体（底部无圆角/边框） -->
+        <Border x:Name="ScheduleHeaderCard" Classes="card" Padding="0" ZIndex="1">
+          <Grid ColumnDefinitions="*,Auto" Margin="16,12" Cursor="Hand"
+                Background="Transparent"
+                Tapped="ScheduleRow_OnTapped">
+            <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,16,0">
+              <TextBlock Text="定时领取" Classes="cardTitleStrong"/>
+              <TextBlock Text="开启后通过 Windows 计划任务在设定时间自动领取" Classes="cardCaption"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10"
+                        VerticalAlignment="Center">
+              <TextBlock Text="开" Classes="cardTitle" VerticalAlignment="Center"
+                         IsVisible="{Binding ScheduledEnabled}"/>
+              <TextBlock Text="关" Classes="cardTitle" VerticalAlignment="Center"
+                         IsVisible="{Binding !ScheduledEnabled}"/>
+              <ToggleSwitch IsChecked="{Binding ScheduledEnabled}"
+                            OffContent="" OnContent="" MinWidth="0"
+                            VerticalAlignment="Center"/>
+              <Border Width="32" Height="32" CornerRadius="4" HorizontalAlignment="Center" VerticalAlignment="Center"
+                      Margin="4,0,0,0" Background="Transparent">
+                <TextBlock x:Name="ScheduleChevron" Classes="rowChevron" Text="&#xE70D;"/>
+              </Border>
+            </StackPanel>
+          </Grid>
+        </Border>
+
+        <!-- 子配置项：独立子卡片。官方两段式：避让 75% 时子内容在最终位置上方 10px 处
+             浮出（透明度 0→1 + 下移），动画由 code-behind 显式 Animation 驱动 -->
+        <Panel x:Name="ScheduleSub" IsVisible="False" Margin="0,-4,0,0" ClipToBounds="True">
+          <Border x:Name="ScheduleSpacer" Height="0"/>
+          <Border x:Name="ScheduleSubCard" Classes="card" Padding="0"
+                  VerticalAlignment="Top" Opacity="0">
+            <Border.RenderTransform>
+              <TranslateTransform Y="-10"/>
+            </Border.RenderTransform>
+            <StackPanel Spacing="0">
+              <Border Height="1" Background="{DynamicResource DividerBrush}"/>
+              <Grid ColumnDefinitions="*,Auto" Margin="16,8">
+                <TextBlock Grid.Column="0" Text="每天执行时间" Classes="cardTitle"
+                           VerticalAlignment="Center"/>
+                <TimePicker Grid.Column="1" SelectedTime="{Binding ScheduledTime}"
+                            ClockIdentifier="24HourClock"
+                            HorizontalAlignment="Right"/>
+              </Grid>
+              <Border Height="1" Background="{DynamicResource DividerBrush}"/>
+              <Grid ColumnDefinitions="*,Auto" Margin="16,8">
+                <TextBlock Grid.Column="0" Text="ServerKey" Classes="cardTitle"
+                           VerticalAlignment="Center"/>
+                <TextBox Grid.Column="1" x:Name="ServerKeyBox" Text="{Binding ServerKey}"
+                         Watermark="SendKey" PasswordChar="●"
+                         GotFocus="ServerKey_OnGotFocus" LostFocus="ServerKey_OnLostFocus"
+                         Width="240" VerticalAlignment="Center"/>
+              </Grid>
+            </StackPanel>
+          </Border>
+        </Panel>
+      </StackPanel>
+
+      <!-- 分组：外观（主题配色 + 显示缩放） -->
+      <StackPanel Spacing="4">
+        <TextBlock Text="外观" Classes="sectionHeader" Margin="0,0,0,8"/>
+        <Border Classes="card" Padding="0">
+          <StackPanel Spacing="0">
+            <Grid ColumnDefinitions="*,Auto" Margin="16,12">
+              <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,16,0">
+                <TextBlock Text="主题配色" Classes="cardTitleStrong"/>
+                <TextBlock Text="跟随系统、浅色或深色" Classes="cardCaption"/>
+              </StackPanel>
+              <ComboBox Grid.Column="1" Width="136" SelectedIndex="{Binding ThemeIndex}"
+                        VerticalAlignment="Center">
+                <ComboBoxItem>跟随系统</ComboBoxItem>
+                <ComboBoxItem>浅色</ComboBoxItem>
+                <ComboBoxItem>深色</ComboBoxItem>
+              </ComboBox>
+            </Grid>
+            <Border Height="1" Background="{DynamicResource DividerBrush}"/>
+            <Grid ColumnDefinitions="*,Auto" Margin="16,12">
+              <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,16,0">
+                <TextBlock Text="显示缩放" Classes="cardTitleStrong"/>
+                <TextBlock Text="调整界面整体大小" Classes="cardCaption"/>
+              </StackPanel>
+              <ComboBox Grid.Column="1" Width="112" SelectedIndex="{Binding ScaleIndex}"
+                        VerticalAlignment="Center">
+                <ComboBoxItem>75%</ComboBoxItem>
+                <ComboBoxItem>100%</ComboBoxItem>
+                <ComboBoxItem>125%</ComboBoxItem>
+                <ComboBoxItem>150%</ComboBoxItem>
+                <ComboBoxItem>175%</ComboBoxItem>
+                <ComboBoxItem>200%</ComboBoxItem>
+                <ComboBoxItem>225%</ComboBoxItem>
+                <ComboBoxItem>250%</ComboBoxItem>
+              </ComboBox>
+            </Grid>
+          </StackPanel>
+        </Border>
+      </StackPanel>
+
+      <TextBlock Text="glacc-auto · v0.1.0"
+                 Classes="cardCaption" HorizontalAlignment="Center"/>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

@@ -1,0 +1,326 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:fa="using:FluentAvalonia.Styling"
+             x:Class="GlaccAuto.Gui.App">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <!-- 应用自有色彩令牌 · 浅色（取值对齐官方 Fluent token）；控件本体样式由 FluentAvalonia 提供 WinUI 官方模板 -->
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="AppBgBrush" Color="#F3F3F3"/>
+          <!-- CardBackgroundFillColorDefault -->
+          <SolidColorBrush x:Key="CardBgBrush" Color="#B3FFFFFF"/>
+          <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF"/>
+          <!-- CardStrokeColorDefault -->
+          <SolidColorBrush x:Key="CardStrokeBrush" Color="#21000000"/>
+          <!-- TextFillColorPrimary / Secondary / Tertiary -->
+          <SolidColorBrush x:Key="TextPrimaryBrush" Color="#E4000000"/>
+          <SolidColorBrush x:Key="TextSecondaryBrush" Color="#9A000000"/>
+          <SolidColorBrush x:Key="TextTertiaryBrush" Color="#72000000"/>
+          <SolidColorBrush x:Key="DividerBrush" Color="#E5E5E5"/>
+          <SolidColorBrush x:Key="TrackBrush" Color="#E5E5E5"/>
+          <SolidColorBrush x:Key="AccentBrush" Color="#0078D4"/>
+          <SolidColorBrush x:Key="AccentHoverBrush" Color="#106EBE"/>
+          <SolidColorBrush x:Key="AccentPressedBrush" Color="#005A9E"/>
+          <SolidColorBrush x:Key="AccentSoftBrush" Color="#1A0078D4"/>
+          <SolidColorBrush x:Key="NavSelectedBrush" Color="#14000000"/>
+          <SolidColorBrush x:Key="SelectionPillBrush" Color="#0067C0"/>
+          <SolidColorBrush x:Key="PopupBgBrush" Color="#FAFAFA"/>
+          <!-- 控件悬停/按下载体色（原 Avalonia FluentTheme 提供，现自行定义） -->
+          <SolidColorBrush x:Key="ControlFillColorSecondaryBrush" Color="#0A000000"/>
+          <SolidColorBrush x:Key="ControlFillColorTertiaryBrush" Color="#06000000"/>
+          <SolidColorBrush x:Key="SmokeBrush" Color="#66000000"/>
+        </ResourceDictionary>
+        <!-- 应用自有色彩令牌 · 深色（取值对齐官方 Fluent token） -->
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="AppBgBrush" Color="#202020"/>
+          <SolidColorBrush x:Key="CardBgBrush" Color="#0FFFFFFF"/>
+          <SolidColorBrush x:Key="SurfaceBrush" Color="#2D2D2D"/>
+          <SolidColorBrush x:Key="CardStrokeBrush" Color="#14FFFFFF"/>
+          <SolidColorBrush x:Key="TextPrimaryBrush" Color="#FFFFFF"/>
+          <SolidColorBrush x:Key="TextSecondaryBrush" Color="#C8FFFFFF"/>
+          <SolidColorBrush x:Key="TextTertiaryBrush" Color="#8AFFFFFF"/>
+          <SolidColorBrush x:Key="DividerBrush" Color="#3D3D3D"/>
+          <SolidColorBrush x:Key="TrackBrush" Color="#3D3D3D"/>
+          <SolidColorBrush x:Key="AccentBrush" Color="#60CDFF"/>
+          <SolidColorBrush x:Key="AccentHoverBrush" Color="#78D4FF"/>
+          <SolidColorBrush x:Key="AccentPressedBrush" Color="#4CC2FF"/>
+          <SolidColorBrush x:Key="AccentSoftBrush" Color="#3360CDFF"/>
+          <SolidColorBrush x:Key="NavSelectedBrush" Color="#14FFFFFF"/>
+          <SolidColorBrush x:Key="SelectionPillBrush" Color="#60CDFF"/>
+          <SolidColorBrush x:Key="PopupBgBrush" Color="#2C2C2C"/>
+          <SolidColorBrush x:Key="ControlFillColorSecondaryBrush" Color="#0FFFFFFF"/>
+          <SolidColorBrush x:Key="ControlFillColorTertiaryBrush" Color="#0AFFFFFF"/>
+          <SolidColorBrush x:Key="SmokeBrush" Color="#66000000"/>
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+
+      <FontFamily x:Key="FontMain">Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI</FontFamily>
+      <FontFamily x:Key="FontDisplay">Segoe UI Variable Display, Segoe UI, Microsoft YaHei UI</FontFamily>
+      <FontFamily x:Key="FontIcons">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+
+      <!-- Win11 标准缓动曲线 -->
+      <Easing x:Key="Win11Ease">0.1,0.9,0.2,1</Easing>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.Styles>
+    <!-- FluentAvalonia：WinUI 3 / Fluent v2 官方控件模板（TextBox 聚焦下划线、NavigationView 等） -->
+    <fa:FluentAvaloniaTheme/>
+
+    <!-- 卡片：中圆角8，1px描边，内边距20；半透明底色透出 Mica -->
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="{DynamicResource CardBgBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <!-- 官方 ControlCornerRadius 8 -->
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="0"/>
+    </Style>
+
+    <!-- 对话框：官方 OverlayCornerRadius 8，实色底（浮于 Smoke 遮罩之上） -->
+    <Style Selector="Border.dialog">
+      <Setter Property="Background" Value="{DynamicResource SurfaceBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="24"/>
+      <Setter Property="BoxShadow" Value="0 8 24 0 #3D000000"/>
+    </Style>
+
+    <!-- 标题栏标题：12px Regular（保持系统原生规格） -->
+    <Style Selector="TextBlock.titleCaption">
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="FontWeight" Value="Regular"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    </Style>
+
+    <!-- 分组标题：官方 14 BodyStrong -->
+    <Style Selector="TextBlock.sectionHeader">
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    </Style>
+
+    <!-- 行标题/说明：官方 SettingsCard Header 14 Regular、说明 12 -->
+    <Style Selector="TextBlock.cardTitle">
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="FontWeight" Value="Normal"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    </Style>
+
+    <Style Selector="TextBlock.cardTitleStrong">
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="FontWeight" Value="Normal"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    </Style>
+
+    <Style Selector="TextBlock.cardCaption">
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+      <Setter Property="TextWrapping" Value="Wrap"/>
+    </Style>
+
+    <!-- 设置行图标：20px 线性图标 -->
+    <Style Selector="TextBlock.rowIcon">
+      <Setter Property="FontFamily" Value="{DynamicResource FontIcons}"/>
+      <Setter Property="FontSize" Value="20"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <!-- 可展开行的下拉箭头：14px 图标置于 32×32 热区容器（官方规格）；
+         时长按官方 AnimatedChevron：展开 333ms / 收起 167ms（样式按状态切换 Transition） -->
+    <Style Selector="TextBlock.rowChevron">
+      <Setter Property="FontFamily" Value="{DynamicResource FontIcons}"/>
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="RenderTransform" Value="rotate(0deg)"/>
+      <Setter Property="Transitions">
+        <Transitions>
+          <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.167"/>
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="TextBlock.rowChevron.expanded">
+      <Setter Property="RenderTransform" Value="rotate(180deg)"/>
+      <Setter Property="Transitions">
+        <Transitions>
+          <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.333"/>
+        </Transitions>
+      </Setter>
+    </Style>
+
+    <!-- 导航栏按钮：44x40（官方紧凑导航规格），左侧3px强调色选中指示器；悬停背景 150ms 过渡 -->
+    <Style Selector="Button.navBtn">
+      <Setter Property="Width" Value="44"/>
+      <Setter Property="Height" Value="40"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+      <Setter Property="VerticalContentAlignment" Value="Stretch"/>
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="Background" Duration="0:0:0.15"/>
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Button.navBtn:pointerover">
+      <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}"/>
+    </Style>
+    <Style Selector="Button.navBtn:pressed">
+      <Setter Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}"/>
+    </Style>
+    <Style Selector="Button.navBtn.selected">
+      <Setter Property="Background" Value="{DynamicResource NavSelectedBrush}"/>
+    </Style>
+    <Style Selector="Border.navPill">
+      <Setter Property="Width" Value="3"/>
+      <Setter Property="Height" Value="18"/>
+      <Setter Property="CornerRadius" Value="2"/>
+      <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+      <Setter Property="HorizontalAlignment" Value="Left"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="Margin" Value="4,0,0,0"/>
+      <Setter Property="Opacity" Value="0"/>
+      <Setter Property="Transitions">
+        <Transitions>
+          <DoubleTransition Property="Opacity" Duration="0:0:0.15"/>
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Button.navBtn.selected Border.navPill">
+      <Setter Property="Opacity" Value="1"/>
+    </Style>
+    <Style Selector="TextBlock.navIcon">
+      <Setter Property="FontFamily" Value="{DynamicResource FontIcons}"/>
+      <Setter Property="FontSize" Value="18"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+      <Setter Property="HorizontalAlignment" Value="Center"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="Foreground" Duration="0:0:0.15"/>
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Button.navBtn.selected TextBlock.navIcon">
+      <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+    </Style>
+
+    <!-- 账号切换按钮：透明底，悬停浮起；背景 150ms 过渡 -->
+    <Style Selector="Button.accountBtn">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Padding" Value="6,5"/>
+      <Setter Property="CornerRadius" Value="6"/>
+      <Setter Property="HorizontalContentAlignment" Value="Left"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="Background" Duration="0:0:0.15"/>
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Button.accountBtn:pointerover">
+      <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}"/>
+    </Style>
+    <Style Selector="Button.accountBtn:pressed">
+      <Setter Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}"/>
+    </Style>
+
+    <!-- 飞出层中的账号菜单项 -->
+    <Style Selector="Button.accountMenuItem">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Padding" Value="12,8"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+      <Setter Property="HorizontalContentAlignment" Value="Left"/>
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="Background" Duration="0:0:0.15"/>
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Button.accountMenuItem:pointerover">
+      <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}"/>
+    </Style>
+
+    <!-- 文本按钮（次要操作） -->
+    <Style Selector="Button.textBtn">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Padding" Value="8,5"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextTertiaryBrush}"/>
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="Background" Duration="0:0:0.15"/>
+          <BrushTransition Property="Foreground" Duration="0:0:0.15"/>
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Button.textBtn:pointerover">
+      <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+    </Style>
+
+    <!-- 页面入场：淡入 + 上移 24px（Win11 页面导航 Decelerate 风格） -->
+    <Style Selector="StackPanel.pageContent">
+      <Style.Animations>
+        <Animation Duration="0:0:0.45" Easing="0,0,0,1">
+          <KeyFrame Cue="0%">
+            <Setter Property="Opacity" Value="0"/>
+            <Setter Property="TranslateTransform.Y" Value="24"/>
+          </KeyFrame>
+          <KeyFrame Cue="100%">
+            <Setter Property="Opacity" Value="1"/>
+            <Setter Property="TranslateTransform.Y" Value="0"/>
+          </KeyFrame>
+        </Animation>
+      </Style.Animations>
+    </Style>
+
+    <!-- 按钮内联加载指示（旋转同步图标） -->
+    <Style Selector="TextBlock.spinner">
+      <Setter Property="RenderTransform">
+        <Setter.Value>
+          <RotateTransform/>
+        </Setter.Value>
+      </Setter>
+      <Style.Animations>
+        <Animation Duration="0:0:0.9" IterationCount="INFINITE">
+          <KeyFrame Cue="0%">
+            <Setter Property="RotateTransform.Angle" Value="0"/>
+          </KeyFrame>
+          <KeyFrame Cue="100%">
+            <Setter Property="RotateTransform.Angle" Value="360"/>
+          </KeyFrame>
+        </Animation>
+      </Style.Animations>
+    </Style>
+
+    <!-- 输入框/下拉框/时间选择器：官方默认 32px 高、14px 字；聚焦下划线等由 FluentAvalonia 官方模板提供 -->
+    <Style Selector="TextBox">
+      <Setter Property="Height" Value="32"/>
+      <Setter Property="FontSize" Value="14"/>
+    </Style>
+    <Style Selector="ComboBox">
+      <Setter Property="Height" Value="32"/>
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="Padding" Value="12,0"/>
+      <!-- FA 模板经 TemplateBinding 透传该属性，默认 Stretch 会导致文字顶对齐 -->
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="TimePicker">
+      <Setter Property="Height" Value="32"/>
+      <Setter Property="FontSize" Value="14"/>
+    </Style>
+  </Application.Styles>
+</Application>

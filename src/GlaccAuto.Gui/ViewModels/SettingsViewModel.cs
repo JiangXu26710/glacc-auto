@@ -27,6 +27,14 @@ public partial class SettingsViewModel : ViewModelBase
         _intervalMin = min.ToString();
         _intervalMax = max.ToString();
 
+        var retry = Math.Clamp(settings.NetworkRetryCount, 0, NetworkRetryUpperBound);
+        if (settings.NetworkRetryCount != retry)
+        {
+            settings.NetworkRetryCount = retry;
+            settings.Save();
+        }
+        _networkRetryCount = retry;
+
         _themeIndex = settings.Theme switch
         {
             "light" => 1,
@@ -41,6 +49,7 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     private const int IntervalUpperBound = 3600;
+    private const int NetworkRetryUpperBound = 10;
 
     [ObservableProperty]
     private bool _scheduledEnabled;
@@ -90,6 +99,22 @@ public partial class SettingsViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _intervalMax = "40";
+
+    /// <summary>网络重试次数（0~10）：失败后的额外重试次数，0 = 失败立即中断；总尝试 = 1 + 此值</summary>
+    [ObservableProperty]
+    private int _networkRetryCount = 3;
+
+    partial void OnNetworkRetryCountChanged(int value)
+    {
+        var v = Math.Clamp(value, 0, NetworkRetryUpperBound);
+        if (v != value)
+        {
+            _networkRetryCount = v;
+            OnPropertyChanged(nameof(NetworkRetryCount));
+        }
+        _settings.NetworkRetryCount = v;
+        _settings.Save();
+    }
 
     [ObservableProperty]
     private int _themeIndex;

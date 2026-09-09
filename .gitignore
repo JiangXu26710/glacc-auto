@@ -4,6 +4,7 @@ obj/
 .venv/
 *.user
 dist/
+package.ps1
 
 # ── 逆向/抓包归档（本地保留，不入库）──
 _reverse/

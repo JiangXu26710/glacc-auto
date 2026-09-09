@@ -1,5 +1,3 @@
-using System.IO;
-using System.Text;
 using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Animation.Easings;
@@ -7,8 +5,6 @@ using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Media;
 using Avalonia.Styling;
-using Avalonia.Threading;
-using Avalonia.VisualTree;
 
 namespace GlaccAuto.Gui.Controls;
 
@@ -85,39 +81,15 @@ public class AnimatedTextBlock : StackPanel
     // Win11 标准缓动
     private static readonly SplineEasing Ease = new(0.1, 0.9, 0.2, 1);
 
-    // ── 临时诊断日志（排查数字"8"偏下；定位后整体移除）──
-    private static readonly string LogPath = ResolveLogPath();
-
-    private static string ResolveLogPath()
-    {
-        var dir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (string.IsNullOrEmpty(dir)) dir = AppContext.BaseDirectory;
-        return Path.Combine(dir, "glacc-auto", "anim_debug.log");
-    }
-
-    private string DbgId => $"0x{GetHashCode():X8}";
-
-    private void Log(string msg)
-    {
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
-            File.AppendAllText(LogPath, $"{DateTime.Now:HH:mm:ss.fff} [{DbgId}] {msg}\n");
-        }
-        catch { /* 诊断日志失败不影响 UI */ }
-    }
-
     static AnimatedTextBlock()
     {
         TextProperty.Changed.AddClassHandler<AnimatedTextBlock>((c, e) =>
         {
             var old = e.OldValue as string;
             var val = e.NewValue as string ?? "";
-            var build = old is null || val.Length != old.Length || !SameDigitLayout(old, val);
-            c.Log($"TextChanged \"{old}\"->\"{val}\" mode={(build ? "build" : "animate")} fs={TextElement.GetFontSize(c):0.#}");
 
             // 初次绑定、长度变化或数字位布局变化：直接重建
-            if (build)
+            if (old is null || val.Length != old.Length || !SameDigitLayout(old, val))
             {
                 c.Build(val);
                 return;
@@ -177,7 +149,6 @@ public class AnimatedTextBlock : StackPanel
         _stepH = h;
         foreach (var r in _reels)
             r.Translate.Y = -(10 + r.Digit) * h;
-        Log($"Calibrate stepH={h:0.###} Y=[{string.Join(",", _reels.Select(r => r.Translate.Y.ToString("0.#")))}]");
         return true;
     }
 
@@ -230,41 +201,12 @@ public class AnimatedTextBlock : StackPanel
                 _statics.Add(tb);
             }
         }
-
-        Log($"Build lh={lh:0.##} font='{FontFamily}' text=\"{text}\" reels={string.Join(" ", _reels.Select(r => $"d={r.Digit} Y={r.Translate.Y:0.##}"))}");
-        ScheduleLayoutDump();
-    }
-
-    /// <summary>布局完成后 dump 滚轮与数字带的实际几何（诊断用）。</summary>
-    private void ScheduleLayoutDump()
-    {
-        var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
-        t.Tick += (_, _) =>
-        {
-            t.Stop();
-            try
-            {
-                var parts = new List<string>();
-                foreach (var r in _reels)
-                {
-                    var ys = string.Join(",", r.Strip.Children.Select(ch => $"{ch.Bounds.Y:0.#}x{ch.Bounds.Height:0.#}"));
-                    parts.Add($"d={r.Digit} Y={r.Translate.Y:0.##} strip[{ys}]");
-                }
-                Log($"Dump stepH={_stepH:0.###} h={Bounds.Height:0.#} {string.Join(" | ", parts)}");
-            }
-            catch (Exception ex)
-            {
-                Log($"DumpErr {ex.Message}");
-            }
-        };
-        t.Start();
     }
 
     /// <summary>逐位滚动：每位走 mod-10 最短路径，位间延迟 60ms，时长 450ms。</summary>
     private void AnimateTo(string oldText, string newText)
     {
         var lh = _stepH;
-        Log($"AnimateTo \"{oldText}\"->\"{newText}\" lh={lh:0.##}");
         var delayStep = TimeSpan.FromMilliseconds(60);
         var staticIndex = 0;
 
@@ -311,7 +253,6 @@ public class AnimatedTextBlock : StackPanel
 
         var fromY = reel.Translate.Y;
         var toY = fromY - delta * lh;
-        Log($"PlayReel {reel.Digit}->{target} delta={delta} lh={lh:0.##} fromY={fromY:0.##} toY={toY:0.##} delay={delay.TotalMilliseconds:0}ms");
 
         var anim = new Animation
         {
@@ -344,7 +285,6 @@ public class AnimatedTextBlock : StackPanel
             // local 值与动画终值一致（整数 lh），无跳变
             reel.Digit = target;
             reel.Translate.Y = -(10 + target) * lh;
-            Log($"ReelDone->{target} localY={reel.Translate.Y:0.##} status={(t.IsFaulted ? "faulted:" + t.Exception?.GetBaseException().Message : "ok")}");
         }, ui);
     }
 }

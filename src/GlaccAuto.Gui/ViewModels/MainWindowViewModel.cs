@@ -16,6 +16,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly AppSettings _settings;
     private readonly GlaccCredentials _cred;
     private readonly GlaccAuthClient _auth;
+    private readonly GlaccSession _session;
     private readonly GlaccGameClient _game;
 
     /// <summary>当前任务阶段（服务端每日可变，从 mobileGLTaskList 动态读取）</summary>
@@ -29,7 +30,8 @@ public partial class MainWindowViewModel : ViewModelBase
 
         _cred = GlaccCredentials.Load();
         _auth = new GlaccAuthClient(_cred);
-        _game = new GlaccGameClient(_cred);
+        _session = new GlaccSession(_cred, _auth, () => _settings.NetworkRetryCount);
+        _game = new GlaccGameClient(_cred, _session);
         _ = InitializeAsync();
     }
 
@@ -149,9 +151,17 @@ public partial class MainWindowViewModel : ViewModelBase
     /// <summary>状态栏提示（网络错误 / 登录过期 / 每次领取结果等）</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasStatusText))]
+    [NotifyPropertyChangedFor(nameof(StatusOffset))]
+    [NotifyPropertyChangedFor(nameof(StatusOpacity))]
     private string _statusText = "";
 
     public bool HasStatusText => !string.IsNullOrEmpty(StatusText);
+
+    /// <summary>状态栏显示时下方按钮的避让位移（DIP）：状态栏不占布局空间，按钮让位并带过渡动画。</summary>
+    public double StatusOffset => HasStatusText ? 16 : 0;
+
+    /// <summary>状态栏显隐：常驻布局树（位于 0 高度行），只做淡入淡出，避免切换时布局重排。</summary>
+    public double StatusOpacity => HasStatusText ? 1 : 0;
 
     public bool IsRunning => State == RunState.Running;
     public bool ButtonEnabled => State == RunState.Idle && IsLoggedIn;
@@ -206,13 +216,19 @@ public partial class MainWindowViewModel : ViewModelBase
                 StatusText = "";
                 return;
             }
-            StatusText = "正在恢复登录态…";
-            var r = await _auth.RefreshAsync();
-            if (!r.Ok)
+            // JWT 仍在有效期且未到 refresh_token 保活间隔：直接复用本地登录态，不打刷新请求
+            if (_session.JwtNeedsRefresh)
             {
-                IsLoggedIn = false;
-                StatusText = r.Error;
-                return;
+                StatusText = "正在恢复登录态…";
+                var r = await _session.EnsureJwtAsync();
+                if (!r.Ok)
+                {
+                    IsLoggedIn = false;
+                    StatusText = r.Error;
+                    // 登录已过期（invalid_grant）：打开登录引导，预填手机号
+                    if (r.NeedRelogin) HandleRelogin();
+                    return;
+                }
             }
             await EnterLoggedInAsync();
         }
@@ -235,17 +251,43 @@ public partial class MainWindowViewModel : ViewModelBase
     private async Task RefreshSnapshotAsync()
     {
         var stages = await _game.GetTaskStagesAsync();
+        if (!TryHandle(stages, "网络异常，无法同步任务进度")) return;
+        ApplyStages(stages.Value!);
+        StatusText = "";
+
         var score = await _game.GetWalletScoreAsync();
-        if (score is not null) BalanceMinutes = ScoreToMinutes(score.Value);
-        if (stages is not null)
+        if (score.Reason == GlaccFailReason.NeedRelogin)
         {
-            ApplyStages(stages);
-            StatusText = "";
+            HandleRelogin();
+            return;
         }
-        else if (score is null)
+        if (score.Ok) BalanceMinutes = ScoreToMinutes(score.Value);
+    }
+
+    /// <summary>
+    /// 统一处理请求结果：成功继续；登录态无法续期则中断并引导重新登录；
+    /// 网络失败给出终态提示并回到空闲态（避免残留"正在…"类临时文案）。
+    /// </summary>
+    private bool TryHandle<T>(GlaccCallResult<T> result, string networkError)
+    {
+        if (result.Ok) return true;
+        if (result.Reason == GlaccFailReason.NeedRelogin)
         {
-            StatusText = "无法连接服务，请检查网络后重试";
+            HandleRelogin();
+            return false;
         }
+        StatusText = networkError;
+        State = RunState.Idle;
+        return false;
+    }
+
+    /// <summary>登录态失效且无法自动续期：中断领取、切回主页并弹短信登录引导。</summary>
+    private void HandleRelogin()
+    {
+        State = RunState.Idle;
+        StatusText = "登录已过期，请重新短信登录";
+        IsSettingsOpen = false;
+        OpenLogin();
     }
 
     private void ApplyStages(List<GlaccTaskStage> stages)
@@ -297,61 +339,95 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private async Task RunClaimLoopAsync()
     {
-        // 开始前拉一次最新进度（避免与他处已完成的重复推送）
+        // 对账①：开始前拉最新进度，确定阶段一的剩余领取次数（避免与他处已完成的重复推送）。
+        // 对账总次数 = 剩余阶段数 + 开头 1 次：开头这次定阶段一领几次，之后每次阶段结束对账
+        // 顺带定出下一阶段领几次；末阶段的结束对账即收尾，不再重复查询。
         var fresh = await _game.GetTaskStagesAsync();
-        if (fresh is null)
-        {
-            StatusText = "网络错误，无法获取任务进度";
-            State = RunState.Idle;
-            return;
-        }
-        ApplyStages(fresh);
+        if (!TryHandle(fresh, "网络异常，已中断")) return;
+        ApplyStages(fresh.Value!);
         if (ClaimIndex >= TotalClaims)
         {
+            // 开头对账即今日已全部完成：无末阶段收尾，这里补查一次钱包刷新余额
+            var wallet = await _game.GetWalletScoreAsync();
+            if (wallet.Reason == GlaccFailReason.NeedRelogin)
+            {
+                HandleRelogin();
+                return;
+            }
+            if (wallet.Ok) BalanceMinutes = ScoreToMinutes(wallet.Value);
             State = RunState.Done;
             return;
         }
 
         for (var si = 0; si < _stages.Count && State == RunState.Running; si++)
         {
+            var firstPush = true;
             while (_stages[si].StageCurrent < _stages[si].StageSum &&
                    State == RunState.Running && ClaimIndex < TotalClaims)
             {
+                if (!firstPush) await Task.Delay(NextInterval());
+                firstPush = false;
                 var stage = _stages[si];
-                var push = await _game.PushTaskAsync(stage.TaskId);
-                if (push is null)
-                {
-                    StatusText = $"网络波动：{stage.Name} 推送失败，重试中";
-                }
-                else if (push.Code == 0)
+
+                // 每个 push 请求的重试预算与 JWT 续期由 GlaccSession 统一处理，失败提示走回调
+                var push = await _game.PushTaskAsync(stage.TaskId,
+                    onRetry: (_, wait) =>
+                    {
+                        StatusText = $"网络波动：{stage.Name} 推送失败，{wait.TotalSeconds:0} 秒后重试";
+                        return Task.CompletedTask;
+                    });
+                if (!TryHandle(push, "网络异常，已中断")) return;
+                if (State != RunState.Running) break;
+
+                var result = push.Value!;
+                if (result.Code == 0)
                 {
                     _stages[si] = stage with { StageCurrent = stage.StageCurrent + 1 };
                     ClaimIndex = _stages.Sum(s => s.StageCurrent);
-                    var addMinutes = ScoreToMinutes(push.AddScore);
+                    var addMinutes = ScoreToMinutes(result.AddScore);
                     StatusText = addMinutes > 0
                         ? $"已领取 {stage.Name}（+{addMinutes:0.#} 分钟）"
                         : $"已领取 {stage.Name}";
-                    var score = await _game.GetWalletScoreAsync();
-                    if (score is not null) BalanceMinutes = ScoreToMinutes(score.Value);
                 }
                 else
                 {
                     // -1702 = 阶段已满；其他 code = 服务端限制，跳下一阶段
-                    StatusText = $"服务端返回 code={push.Code}（{stage.Name} 暂不可推），跳下一阶段";
+                    StatusText = $"服务端返回 code={result.Code}（{stage.Name} 暂不可推），跳下一阶段";
                     break;
                 }
-                if (State != RunState.Running) break;
-                await Task.Delay(NextInterval());
             }
+
+            // 阶段推送跑完后对账：等待 3s 让服务端落账，再拉服务端进度比对本地计数。
+            // 等待短于落账耗时会把"已发放但服务端未记账"误判为发放链路失效（实测落账 ≤2s）。
+            // 本地计数虚高（服务端进度少于已确认的领取次数）= 发放链路失效，中断业务；
+            // 服务端更高（他处领取/阶段已满跳过等）以服务端为准继续。
+            if (State != RunState.Running) break;
+            await Task.Delay(TimeSpan.FromSeconds(3));
+            // 运行期空列表视为查询失败：对账中服务端不应清空进度
+            var server = await _game.GetTaskStagesAsync(accept: s => s is { Count: > 0 });
+            if (!TryHandle(server, "网络异常，已中断")) return;
+            var serverStages = server.Value!;
+            var serverCount = serverStages.Sum(s => s.StageCurrent);
+            if (ClaimIndex > serverCount)
+            {
+                ApplyStages(serverStages);
+                StatusText = $"进度对账异常（本地 {ClaimIndex} 次 / 服务端 {serverCount} 次），已停止领取";
+                State = RunState.Idle;
+                return;
+            }
+            ApplyStages(serverStages);
         }
 
         if (State == RunState.Running)
         {
-            // 收尾：以服务端进度为准
-            var final = await _game.GetTaskStagesAsync();
-            if (final is not null) ApplyStages(final);
+            // 收尾：末阶段的结束对账已同步服务端进度，这里只刷新钱包余额
             var wallet = await _game.GetWalletScoreAsync();
-            if (wallet is not null) BalanceMinutes = ScoreToMinutes(wallet.Value);
+            if (wallet.Reason == GlaccFailReason.NeedRelogin)
+            {
+                HandleRelogin();
+                return;
+            }
+            if (wallet.Ok) BalanceMinutes = ScoreToMinutes(wallet.Value);
             State = RunState.Done;
             // 完成态提示由任务卡副标题（StageText）唯一表达，状态栏直接清空避免重复
             StatusText = "";

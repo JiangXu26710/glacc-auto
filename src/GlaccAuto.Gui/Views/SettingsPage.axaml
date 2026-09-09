@@ -46,6 +46,30 @@
           </Grid>
         </Border>
 
+        <!-- 网络重试次数：独立行卡片 -->
+        <Border Classes="card" Padding="0">
+          <Grid ColumnDefinitions="*,Auto" Margin="16,12">
+            <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,16,0">
+              <TextBlock Text="网络重试次数" Classes="cardTitleStrong"/>
+              <TextBlock Text="网络失败后的自动重试次数，0 为失败立即中断" Classes="cardCaption"/>
+            </StackPanel>
+            <ComboBox Grid.Column="1" Width="136" SelectedIndex="{Binding NetworkRetryCount}"
+                      VerticalAlignment="Center">
+              <ComboBoxItem>0 次</ComboBoxItem>
+              <ComboBoxItem>1 次</ComboBoxItem>
+              <ComboBoxItem>2 次</ComboBoxItem>
+              <ComboBoxItem>3 次</ComboBoxItem>
+              <ComboBoxItem>4 次</ComboBoxItem>
+              <ComboBoxItem>5 次</ComboBoxItem>
+              <ComboBoxItem>6 次</ComboBoxItem>
+              <ComboBoxItem>7 次</ComboBoxItem>
+              <ComboBoxItem>8 次</ComboBoxItem>
+              <ComboBoxItem>9 次</ComboBoxItem>
+              <ComboBoxItem>10 次</ComboBoxItem>
+            </ComboBox>
+          </Grid>
+        </Border>
+
         <!-- 定时领取：行头卡片（高度固定）；展开时与子卡片连为一体（底部无圆角/边框） -->
         <Border x:Name="ScheduleHeaderCard" Classes="card" Padding="0" ZIndex="1">
           <Grid ColumnDefinitions="*,Auto" Margin="16,12" Cursor="Hand"

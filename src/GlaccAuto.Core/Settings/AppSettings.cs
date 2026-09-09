@@ -12,6 +12,8 @@ public sealed class AppSettings
     public string ServerKey { get; set; } = "";
     public int IntervalMinSec { get; set; } = 30;
     public int IntervalMaxSec { get; set; } = 40;
+    /// <summary>网络失败后的自动重试次数（0~10），0 = 失败立即中断；总尝试次数 = 1 + 此值</summary>
+    public int NetworkRetryCount { get; set; } = 3;
     /// <summary>system | light | dark</summary>
     public string Theme { get; set; } = "system";
     /// <summary>界面缩放百分比（75~250，步进 25），基准 125% = 当前 1.3x 设计</summary>

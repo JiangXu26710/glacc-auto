@@ -272,7 +272,7 @@
     </Style>
 
     <!-- 页面入场：淡入 + 上移 24px（Win11 页面导航 Decelerate 风格） -->
-    <Style Selector="StackPanel.pageContent">
+    <Style Selector="StackPanel.pageContent, Grid.pageContent">
       <Style.Animations>
         <Animation Duration="0:0:0.45" Easing="0,0,0,1">
           <KeyFrame Cue="0%">

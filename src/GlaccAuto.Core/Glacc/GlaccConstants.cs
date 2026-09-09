@@ -29,6 +29,12 @@ public static class GlaccConstants
     // UA 不写死：由 GlaccUa 模板 + 设备档案（credentials.json）生成，
     // 登录时按手机号哈希从 GlaccDevicePool 确定性选档，避免全局同一设备指纹。
 
+    // ── 服务端业务码（实测所得）──
+    /// <summary>登录校验失败：JWT 无效/过期/缺失。HTTP 仍为 200，仅 body.code 区分（钱包与 push 已实测）。</summary>
+    public const int AuthErrorCode = 10003;
+    /// <summary>push 请求参数无效（如 taskId 不存在）。鉴权校验先于参数校验。</summary>
+    public const int InvalidParamCode = 10053;
+
     // ── 换算 ──
     /// <summary>钱包 score → 可加速时长：80 score = 1 分钟</summary>
     public const double ScorePerMinute = 80.0;

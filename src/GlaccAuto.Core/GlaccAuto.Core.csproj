@@ -5,4 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="TlsClient.Native.win-x64" Version="1.16.0" />
+  </ItemGroup>
 </Project>

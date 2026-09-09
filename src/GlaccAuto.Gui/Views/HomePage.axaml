@@ -144,6 +144,12 @@
         </StackPanel>
       </Border>
 
+      <!-- 状态栏：网络/服务端提示与领取结果 -->
+      <TextBlock Text="{Binding StatusText}" Classes="cardCaption"
+                 IsVisible="{Binding HasStatusText}"
+                 HorizontalAlignment="Center" TextAlignment="Center"
+                 TextWrapping="Wrap" MaxWidth="480"/>
+
       <!-- 领取按钮：各账号共用，全宽主操作（60 高 / 22 号字） -->
       <Button Classes="accent" Command="{Binding StartCommand}"
               IsEnabled="{Binding ButtonEnabled}"
@@ -158,15 +164,9 @@
           <TextBlock Text="{Binding ButtonText}" VerticalAlignment="Center"/>
         </StackPanel>
       </Button>
-
-      <!-- 演示辅助，接入真实业务后移除 -->
-      <Button Classes="textBtn" Content="重置演示数据"
-              Command="{Binding ResetDemoCommand}"
-              IsVisible="{Binding CanReset}"
-              HorizontalAlignment="Center"/>
     </StackPanel>
 
-    <!-- 登录对话框：手机号 → 短信验证码两步；演示模式，任意非空验证码即可登录 -->
+    <!-- 登录对话框：手机号 → 短信验证码两步（真实流程） -->
     <Panel ZIndex="10" IsVisible="{Binding ShowLoginDialog}">
       <Border Background="{DynamicResource SmokeBrush}" PointerPressed="OnLoginScrimPressed"/>
       <Border Classes="dialog" Width="416"
@@ -181,12 +181,16 @@
                        Foreground="{DynamicResource TextSecondaryBrush}"/>
             <TextBox Text="{Binding PhoneInput}" Watermark="手机号" MaxLength="11"
                      Margin="0,20,0,0"/>
+            <TextBlock Text="{Binding LoginError}" FontSize="12"
+                       IsVisible="{Binding HasLoginError}" TextWrapping="Wrap"
+                       Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                       Margin="0,8,0,0"/>
             <StackPanel Orientation="Horizontal" Spacing="8"
                         HorizontalAlignment="Right" Margin="0,24,0,0">
               <Button Content="取消" MinWidth="120" Height="32" FontSize="14"
                       Command="{Binding CancelLoginCommand}" IsCancel="True"/>
               <Button Content="发送验证码" MinWidth="120" Height="32" FontSize="14" Classes="accent"
-                      Command="{Binding SendCodeCommand}" IsEnabled="{Binding CanResend}" IsDefault="True"/>
+                      Command="{Binding SendCodeCommand}" IsEnabled="{Binding CanSendCode}" IsDefault="True"/>
             </StackPanel>
           </StackPanel>
 
@@ -200,14 +204,18 @@
             <TextBox Text="{Binding CodeInput, UpdateSourceTrigger=PropertyChanged}"
                      Watermark="6 位验证码" MaxLength="6" Margin="0,20,0,0"/>
             <Button Classes="textBtn" Content="{Binding ResendText}"
-                    Command="{Binding SendCodeCommand}" IsEnabled="{Binding CanResend}"
+                    Command="{Binding SendCodeCommand}" IsEnabled="{Binding CanSendCode}"
                     HorizontalAlignment="Left" Margin="0,10,0,0"/>
+            <TextBlock Text="{Binding LoginError}" FontSize="12"
+                       IsVisible="{Binding HasLoginError}" TextWrapping="Wrap"
+                       Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                       Margin="0,8,0,0"/>
             <StackPanel Orientation="Horizontal" Spacing="8"
                         HorizontalAlignment="Right" Margin="0,24,0,0">
               <Button Content="返回" MinWidth="120" Height="32" FontSize="14"
                       Command="{Binding BackToPhoneCommand}"/>
               <Button Content="登录" MinWidth="120" Height="32" FontSize="14" Classes="accent"
-                      Command="{Binding ConfirmLoginCommand}" IsEnabled="{Binding HasCodeInput}"
+                      Command="{Binding ConfirmLoginCommand}" IsEnabled="{Binding CanConfirmLogin}"
                       IsDefault="True"/>
             </StackPanel>
           </StackPanel>

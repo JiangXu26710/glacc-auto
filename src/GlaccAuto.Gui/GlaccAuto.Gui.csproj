@@ -10,6 +10,8 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <PublishAot>true</PublishAot>
+    <!-- 固定 RID：让 TlsClient.Native.win-x64 的原生库 targets 在常规构建也拷贝 tls-client.dll -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.*" />
@@ -20,4 +22,11 @@
   <ItemGroup>
     <ProjectReference Include="..\GlaccAuto.Core\GlaccAuto.Core.csproj" />
   </ItemGroup>
+  <!-- 发布时把 TLS 指纹库放到 publish 根目录（GlaccTls 探针覆盖 exe 同目录） -->
+  <Target Name="CopyTlsClientToPublish" AfterTargets="Publish">
+    <Copy SourceFiles="$(OutputPath)runtimes\tls-client\win\x64\tls-client.dll"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(OutputPath)runtimes\tls-client\win\x64\tls-client.dll')" />
+  </Target>
 </Project>

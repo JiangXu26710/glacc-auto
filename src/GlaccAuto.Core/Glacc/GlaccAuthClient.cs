@@ -1,0 +1,236 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
+
+namespace GlaccAuto.Core.Glacc;
+
+/// <summary>登录态管理（refresh / 短信登录），对应 _reverse/scripts/auth.py 的移植。</summary>
+public sealed class GlaccAuthClient
+{
+    private readonly GlaccCredentials _cred;
+
+    public GlaccAuthClient(GlaccCredentials cred)
+    {
+        _cred = cred;
+    }
+
+    // ── 对外操作 ──
+
+    /// <summary>发送短信验证码（captcha 直签发 + verification）。成功后 verification_id 存入凭证。</summary>
+    public async Task<GlaccResult> SendSmsAsync(string phoneInput, CancellationToken ct = default)
+    {
+        var phone = NormalizePhone(phoneInput);
+        if (phone is null) return GlaccResult.Fail("手机号格式不正确（应为 11 位大陆手机号）");
+
+        var captcha = await CaptchaInitAsync("POST:/v1/auth/verification", phone, ct);
+        if (captcha is null) return GlaccResult.Fail("获取人机凭证失败，请稍后重试");
+
+        var resp = await PostJsonAsync($"{GlaccConstants.AuthBase}/v1/auth/verification",
+            new VerificationRequest(captcha, GlaccConstants.ClientId, phone, "ANY", "SIGN_IN"),
+            GlaccJsonContext.Default.VerificationRequest, ct);
+        if (resp is null) return GlaccResult.Fail("网络错误，发送验证码失败");
+
+        using var doc = JsonDocument.Parse(resp);
+        var root = doc.RootElement;
+        if (!root.TryGetProperty("verification_id", out var vid))
+        {
+            var msg = DescribeError(root);
+            return GlaccResult.Fail($"发送验证码失败：{msg}");
+        }
+        _cred.Phone = phone;
+        _cred.EnsureDevice();
+        _cred.VerificationId = vid.GetString() ?? "";
+        _cred.VerificationIdAt = GlaccCredentials.NowSeconds();
+        _cred.Save();
+        return GlaccResult.Success();
+    }
+
+    /// <summary>用短信验证码完成登录（verify → captcha → signin），成功后凭证入库。</summary>
+    public async Task<GlaccResult> LoginAsync(string code, CancellationToken ct = default)
+    {
+        var vid = _cred.VerificationId;
+        if (string.IsNullOrEmpty(vid)) return GlaccResult.Fail("请先发送验证码");
+        if (GlaccCredentials.NowSeconds() - _cred.VerificationIdAt > 280)
+            return GlaccResult.Fail("验证码已过期（5 分钟），请重新发送");
+
+        // 1) 验证码换 verification_token
+        var vResp = await PostJsonAsync($"{GlaccConstants.AuthBase}/v1/auth/verification/verify",
+            new VerifyCodeRequest(GlaccConstants.ClientId, vid, code),
+            GlaccJsonContext.Default.VerifyCodeRequest, ct);
+        if (vResp is null) return GlaccResult.Fail("网络错误，验证码校验失败");
+        string verificationToken;
+        using (var doc = JsonDocument.Parse(vResp))
+        {
+            if (!doc.RootElement.TryGetProperty("verification_token", out var vt))
+                return GlaccResult.Fail($"验证码校验失败：{DescribeError(doc.RootElement)}");
+            verificationToken = vt.GetString() ?? "";
+        }
+
+        // 2) signin（signin action 需要自己的 captcha_token）
+        var captcha = await CaptchaInitAsync("POST:/v1/auth/signin", _cred.Phone, ct);
+        if (captcha is null) return GlaccResult.Fail("获取人机凭证失败，请稍后重试");
+
+        var sResp = await PostJsonAsync($"{GlaccConstants.AuthBase}/v1/auth/signin",
+            new SigninRequest(captcha, GlaccConstants.ClientId, GlaccConstants.ClientSecret,
+                _cred.Phone, verificationToken),
+            GlaccJsonContext.Default.SigninRequest, ct);
+        if (sResp is null) return GlaccResult.Fail("网络错误，登录失败");
+
+        using var sDoc = JsonDocument.Parse(sResp);
+        var sRoot = sDoc.RootElement;
+        if (!sRoot.TryGetProperty("access_token", out var at))
+            return GlaccResult.Fail($"登录失败：{DescribeError(sRoot)}");
+
+        _cred.AccessToken = at.GetString() ?? "";
+        if (sRoot.TryGetProperty("refresh_token", out var rt))
+            _cred.RefreshToken = rt.GetString() ?? _cred.RefreshToken;
+        if (sRoot.TryGetProperty("sub", out var sub))
+            _cred.Sub = sub.GetString() ?? "";
+        _cred.ObtainedAt = GlaccCredentials.NowSeconds();
+        _cred.ExpiresIn = sRoot.TryGetProperty("expires_in", out var ei) && ei.TryGetInt32(out var sec)
+            ? sec : 7200;
+        // 登录完成，清理一次性状态
+        _cred.VerificationId = "";
+        _cred.VerificationIdAt = 0;
+        _cred.Save();
+        return GlaccResult.Success();
+    }
+
+    /// <summary>用 refresh_token 换新 JWT（已确认端点 POST /v1/auth/token，JSON grant_type）。</summary>
+    public async Task<GlaccResult> RefreshAsync(CancellationToken ct = default)
+    {
+        var rt = _cred.RefreshToken;
+        if (string.IsNullOrEmpty(rt)) return GlaccResult.Fail("无 refresh_token，请重新登录");
+
+        var resp = await PostJsonAsync($"{GlaccConstants.AuthBase}/v1/auth/token",
+            new TokenRefreshRequest("refresh_token", rt, GlaccConstants.ClientId,
+                GlaccConstants.ClientSecret),
+            GlaccJsonContext.Default.TokenRefreshRequest, ct);
+        if (resp is null) return GlaccResult.Fail("网络错误，刷新登录态失败");
+
+        using var doc = JsonDocument.Parse(resp);
+        var root = doc.RootElement;
+        if (!root.TryGetProperty("access_token", out var at))
+        {
+            // invalid_grant / 4126 = refresh_token 已失效，需重新短信登录
+            var invalid = root.TryGetProperty("error", out var err) &&
+                          err.GetString()?.Contains("invalid_grant") == true;
+            return GlaccResult.Fail(
+                invalid ? "登录已过期，请重新短信登录" : $"刷新登录态失败：{DescribeError(root)}",
+                needRelogin: invalid);
+        }
+        _cred.AccessToken = at.GetString() ?? "";
+        if (root.TryGetProperty("refresh_token", out var nrt))
+            _cred.RefreshToken = nrt.GetString() ?? rt; // 服务端可能轮换 refresh_token
+        _cred.ObtainedAt = GlaccCredentials.NowSeconds();
+        _cred.ExpiresIn = root.TryGetProperty("expires_in", out var ei) && ei.TryGetInt32(out var sec)
+            ? sec : 7200;
+        _cred.Save();
+        return GlaccResult.Success();
+    }
+
+    // ── 内部步骤 ──
+
+    /// <summary>雷盾 captcha_token 直签发（无人工挑战）；失败返回 null。</summary>
+    private async Task<string?> CaptchaInitAsync(string action, string phone, CancellationToken ct)
+    {
+        var resp = await PostJsonAsync(
+            $"{GlaccConstants.AuthBase}/v1/shield/captcha/init?client_id={GlaccConstants.ClientId}",
+            new CaptchaInitRequest(action, GlaccConstants.ClientId, _cred.DeviceId,
+                new CaptchaMeta(phone), GlaccConstants.RedirectUri),
+            GlaccJsonContext.Default.CaptchaInitRequest, ct);
+        if (resp is null) return null;
+        using var doc = JsonDocument.Parse(resp);
+        return doc.RootElement.TryGetProperty("captcha_token", out var t)
+            ? t.GetString() : null;
+    }
+
+    // ── HTTP 基础设施（走 GlaccTls：OkHttp/Android TLS 指纹 + 设备档案 UA）──
+
+    private async Task<string?> PostJsonAsync<T>(string url, T payload, JsonTypeInfo<T> typeInfo,
+        CancellationToken ct)
+    {
+        try
+        {
+            var device = _cred.DeviceOrDefault;
+            var headers = new Dictionary<string, string>
+            {
+                ["x-device-id"] = _cred.DeviceId,
+                ["user-agent"] = GlaccUa.Auth(device),
+                ["accept-language"] = "zh-CN",
+                ["content-type"] = "application/json; charset=utf-8",
+            };
+            var body = JsonSerializer.Serialize(payload, typeInfo);
+            var resp = await Task.Run(() => GlaccTls.Send(
+                new TlsRequestPayload(
+                    GlaccDevicePool.IdentifierFor(device), "POST", url, body,
+                    headers, [.. headers.Keys], 15, true, true, false, false, true),
+                out _), ct);
+            return resp?.Body;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static string DescribeError(JsonElement root)
+    {
+        // 尽量提取 error / error_description / message / code
+        if (root.ValueKind != JsonValueKind.Object) return root.GetRawText() is { Length: > 0 } s ? s : "未知错误";
+        foreach (var key in new[] { "error_description", "error", "message", "msg" })
+        {
+            if (root.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String &&
+                v.GetString() is { Length: > 0 } s)
+                return s;
+        }
+        if (root.TryGetProperty("code", out var code))
+            return $"code={code.GetRawText()}";
+        return "未知错误";
+    }
+
+    /// <summary>11 位手机号 → "+86 12xxxxxxxxx"（与官方客户端一致的格式）。</summary>
+    public static string? NormalizePhone(string input)
+    {
+        var digits = new string(input.Where(char.IsDigit).ToArray());
+        if (digits.Length == 13 && digits.StartsWith("86")) digits = digits[2..];
+        return digits.Length == 11 && digits.StartsWith('1') ? $"+86 {digits}" : null;
+    }
+}
+
+// ── 请求 DTO（source-gen 序列化，AOT 安全）──
+
+internal record TokenRefreshRequest(
+    [property: JsonPropertyName("grant_type")] string GrantType,
+    [property: JsonPropertyName("refresh_token")] string RefreshToken,
+    [property: JsonPropertyName("client_id")] string ClientId,
+    [property: JsonPropertyName("client_secret")] string ClientSecret);
+
+internal record CaptchaMeta([property: JsonPropertyName("phone_number")] string PhoneNumber);
+
+internal record CaptchaInitRequest(
+    [property: JsonPropertyName("action")] string Action,
+    [property: JsonPropertyName("client_id")] string ClientId,
+    [property: JsonPropertyName("device_id")] string DeviceId,
+    [property: JsonPropertyName("meta")] CaptchaMeta Meta,
+    [property: JsonPropertyName("redirect_uri")] string RedirectUri);
+
+internal record VerificationRequest(
+    [property: JsonPropertyName("captcha_token")] string CaptchaToken,
+    [property: JsonPropertyName("client_id")] string ClientId,
+    [property: JsonPropertyName("phone_number")] string PhoneNumber,
+    [property: JsonPropertyName("target")] string Target,
+    [property: JsonPropertyName("usage")] string Usage);
+
+internal record VerifyCodeRequest(
+    [property: JsonPropertyName("client_id")] string ClientId,
+    [property: JsonPropertyName("verification_id")] string VerificationId,
+    [property: JsonPropertyName("verification_code")] string VerificationCode);
+
+internal record SigninRequest(
+    [property: JsonPropertyName("captcha_token")] string CaptchaToken,
+    [property: JsonPropertyName("client_id")] string ClientId,
+    [property: JsonPropertyName("client_secret")] string ClientSecret,
+    [property: JsonPropertyName("username")] string Username,
+    [property: JsonPropertyName("verification_token")] string VerificationToken);

@@ -3,6 +3,7 @@ bin/
 obj/
 .venv/
 *.user
+dist/
 
 # ── 逆向/抓包归档（本地保留，不入库）──
 _reverse/
@@ -14,3 +15,10 @@ scripts/auth.json
 .vs/
 .idea/
 .workbuddy/
+work/
+.vscode/
+.codex/
+
+# ── 归档 ──
+.trash/
+

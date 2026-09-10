@@ -1,5 +1,3 @@
-<div align="center">
-
 # glacc-auto
 
 自动领取给梨加速器时长。

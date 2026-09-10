@@ -11,6 +11,8 @@ public enum GlaccFailReason
     Network,
     /// <summary>登录态无法续期（refresh_token 失效），需重新短信登录</summary>
     NeedRelogin,
+    /// <summary>本地无登录凭证：尚未登录，需先完成短信登录</summary>
+    NotLoggedIn,
 }
 
 /// <summary>统一请求结果：<see cref="Value"/> 仅在 <see cref="Ok"/> 时有效。</summary>
@@ -51,7 +53,11 @@ public sealed class GlaccSession
         !_cred.IsJwtValid ||
         GlaccCredentials.NowSeconds() - _cred.ObtainedAt > RefreshKeepAliveSeconds;
 
-    /// <summary>确保 JWT 可用：需要时才打 refresh 端点；force = 无视过期判断强制换新。</summary>
+    /// <summary>
+    /// 确保 JWT 可用：需要时才打 refresh 端点；force = 无视过期判断强制换新。
+    /// 网络层失败（无响应/5xx）按重试预算退避重试——刷新多发生在启动与定时拉起路径，
+    /// 无人值守，不能因一次瞬断就判登录不可用；invalid_grant 等业务判定立即返回、不消耗预算。
+    /// </summary>
     public async Task<GlaccResult> EnsureJwtAsync(bool force = false, CancellationToken ct = default)
     {
         if (!force && !JwtNeedsRefresh) return GlaccResult.Success();
@@ -59,7 +65,13 @@ public sealed class GlaccSession
         try
         {
             if (!force && !JwtNeedsRefresh) return GlaccResult.Success();
-            return await _auth.RefreshAsync(ct);
+            var maxAttempts = Math.Clamp(_retryCount(), 0, 10) + 1;
+            for (var attempt = 1; ; attempt++)
+            {
+                var result = await _auth.RefreshAsync(ct);
+                if (result.Ok || !result.Retryable || attempt >= maxAttempts) return result;
+                await Task.Delay(BackoffDelay(attempt - 1), ct);
+            }
         }
         finally
         {

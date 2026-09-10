@@ -280,38 +280,39 @@ public partial class MainWindowViewModel : ViewModelBase
         StatusText = "";
 
         var score = await _game.GetWalletScoreAsync();
-        if (score.Reason == GlaccFailReason.NeedRelogin)
-        {
-            HandleRelogin();
-            return;
-        }
+        if (TryHandleRelogin(score.Reason)) return;
         if (score.Ok) BalanceMinutes = ScoreToMinutes(score.Value);
     }
 
     /// <summary>
-    /// 统一处理请求结果：成功继续；登录态无法续期则中断并引导重新登录；
+    /// 统一处理请求结果：成功继续；登录态不可用则中断并引导重新登录；
     /// 网络失败给出终态提示并回到空闲态（避免残留"正在…"类临时文案）。
     /// </summary>
     private bool TryHandle<T>(GlaccCallResult<T> result, string networkError)
     {
         if (result.Ok) return true;
-        if (result.Reason == GlaccFailReason.NeedRelogin)
-        {
-            HandleRelogin();
-            return false;
-        }
+        if (TryHandleRelogin(result.Reason)) return false;
         StatusText = networkError;
         State = RunState.Idle;
         _scheduledOutcome ??= networkError;
         return false;
     }
 
-    /// <summary>登录态失效且无法自动续期：中断领取、切回主页并弹短信登录引导。</summary>
-    private void HandleRelogin()
+    /// <summary>登录态不可用（本地无凭证 / 无法自动续期）时中断并引导重新登录；返回是否已处理。</summary>
+    private bool TryHandleRelogin(GlaccFailReason reason)
+    {
+        if (reason is not (GlaccFailReason.NeedRelogin or GlaccFailReason.NotLoggedIn)) return false;
+        HandleRelogin(expired: reason == GlaccFailReason.NeedRelogin);
+        return true;
+    }
+
+    /// <summary>中断领取、切回主页并弹短信登录引导。</summary>
+    /// <param name="expired">true = 原登录态已失效；false = 本地尚无凭证</param>
+    private void HandleRelogin(bool expired = true)
     {
         State = RunState.Idle;
-        StatusText = "登录已过期，请重新短信登录";
-        _scheduledOutcome ??= "登录已过期，需要重新短信登录";
+        StatusText = expired ? "登录已过期，请重新短信登录" : "尚未登录，请先完成短信登录";
+        _scheduledOutcome ??= expired ? "登录已过期，需要重新短信登录" : "尚未登录，需要先完成短信登录";
         IsSettingsOpen = false;
         OpenLogin();
     }
@@ -380,11 +381,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             // 开头对账即今日已全部完成：无末阶段收尾，这里补查一次钱包刷新余额
             var wallet = await _game.GetWalletScoreAsync();
-            if (wallet.Reason == GlaccFailReason.NeedRelogin)
-            {
-                HandleRelogin();
-                return;
-            }
+            if (TryHandleRelogin(wallet.Reason)) return;
             if (wallet.Ok) BalanceMinutes = ScoreToMinutes(wallet.Value);
             CompleteScheduledRun();
             return;
@@ -454,11 +451,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             // 收尾：末阶段的结束对账已同步服务端进度，这里只刷新钱包余额
             var wallet = await _game.GetWalletScoreAsync();
-            if (wallet.Reason == GlaccFailReason.NeedRelogin)
-            {
-                HandleRelogin();
-                return;
-            }
+            if (TryHandleRelogin(wallet.Reason)) return;
             if (wallet.Ok) BalanceMinutes = ScoreToMinutes(wallet.Value);
             CompleteScheduledRun();
             // 完成态提示由任务卡副标题（StageText）唯一表达，状态栏直接清空避免重复

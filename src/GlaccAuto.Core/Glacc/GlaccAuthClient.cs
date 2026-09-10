@@ -29,9 +29,10 @@ public sealed class GlaccAuthClient
         var resp = await PostJsonAsync($"{GlaccConstants.AuthBase}/v1/auth/verification",
             new VerificationRequest(captcha, GlaccConstants.ClientId, phone, "ANY", "SIGN_IN"),
             GlaccJsonContext.Default.VerificationRequest, ct);
-        if (resp is null) return GlaccResult.Fail("网络错误，发送验证码失败");
+        if (resp.Body is null) return GlaccResult.Fail("网络错误，发送验证码失败");
+        using var doc = TryParse(resp.Body);
+        if (doc is null) return GlaccResult.Fail("发送验证码失败：服务端响应异常");
 
-        using var doc = JsonDocument.Parse(resp);
         var root = doc.RootElement;
         if (!root.TryGetProperty("verification_id", out var vid))
         {
@@ -58,10 +59,11 @@ public sealed class GlaccAuthClient
         var vResp = await PostJsonAsync($"{GlaccConstants.AuthBase}/v1/auth/verification/verify",
             new VerifyCodeRequest(GlaccConstants.ClientId, vid, code),
             GlaccJsonContext.Default.VerifyCodeRequest, ct);
-        if (vResp is null) return GlaccResult.Fail("网络错误，验证码校验失败");
+        if (vResp.Body is null) return GlaccResult.Fail("网络错误，验证码校验失败");
         string verificationToken;
-        using (var doc = JsonDocument.Parse(vResp))
+        using (var doc = TryParse(vResp.Body))
         {
+            if (doc is null) return GlaccResult.Fail("验证码校验失败：服务端响应异常");
             if (!doc.RootElement.TryGetProperty("verification_token", out var vt))
                 return GlaccResult.Fail($"验证码校验失败：{DescribeError(doc.RootElement)}");
             verificationToken = vt.GetString() ?? "";
@@ -75,9 +77,10 @@ public sealed class GlaccAuthClient
             new SigninRequest(captcha, GlaccConstants.ClientId, GlaccConstants.ClientSecret,
                 _cred.Phone, verificationToken),
             GlaccJsonContext.Default.SigninRequest, ct);
-        if (sResp is null) return GlaccResult.Fail("网络错误，登录失败");
+        if (sResp.Body is null) return GlaccResult.Fail("网络错误，登录失败");
+        using var sDoc = TryParse(sResp.Body);
+        if (sDoc is null) return GlaccResult.Fail("登录失败：服务端响应异常");
 
-        using var sDoc = JsonDocument.Parse(sResp);
         var sRoot = sDoc.RootElement;
         if (!sRoot.TryGetProperty("access_token", out var at))
             return GlaccResult.Fail($"登录失败：{DescribeError(sRoot)}");
@@ -97,7 +100,11 @@ public sealed class GlaccAuthClient
         return GlaccResult.Success();
     }
 
-    /// <summary>用 refresh_token 换新 JWT（已确认端点 POST /v1/auth/token，JSON grant_type）。</summary>
+    /// <summary>
+    /// 用 refresh_token 换新 JWT（端点 POST /v1/auth/token，JSON grant_type）。
+    /// 网络层失败（无响应/5xx/网关错误页）标记为可重试，由调用方按重试预算退避重试；
+    /// invalid_grant 是明确的业务判定，不重试。
+    /// </summary>
     public async Task<GlaccResult> RefreshAsync(CancellationToken ct = default)
     {
         var rt = _cred.RefreshToken;
@@ -107,9 +114,12 @@ public sealed class GlaccAuthClient
             new TokenRefreshRequest("refresh_token", rt, GlaccConstants.ClientId,
                 GlaccConstants.ClientSecret),
             GlaccJsonContext.Default.TokenRefreshRequest, ct);
-        if (resp is null) return GlaccResult.Fail("网络错误，刷新登录态失败");
+        if (resp.Transient)
+            return GlaccResult.Fail("网络错误，刷新登录态失败", retryable: true);
+        using var doc = TryParse(resp.Body);
+        if (doc is null)
+            return GlaccResult.Fail("刷新登录态失败：服务端响应异常", retryable: true);
 
-        using var doc = JsonDocument.Parse(resp);
         var root = doc.RootElement;
         if (!root.TryGetProperty("access_token", out var at))
         {
@@ -140,16 +150,16 @@ public sealed class GlaccAuthClient
             new CaptchaInitRequest(action, GlaccConstants.ClientId, _cred.DeviceId,
                 new CaptchaMeta(phone), GlaccConstants.RedirectUri),
             GlaccJsonContext.Default.CaptchaInitRequest, ct);
-        if (resp is null) return null;
-        using var doc = JsonDocument.Parse(resp);
-        return doc.RootElement.TryGetProperty("captcha_token", out var t)
+        if (resp.Body is null) return null;
+        using var doc = TryParse(resp.Body);
+        return doc is not null && doc.RootElement.TryGetProperty("captcha_token", out var t)
             ? t.GetString() : null;
     }
 
     // ── HTTP 基础设施（走 GlaccTls：OkHttp/Android TLS 指纹 + 设备档案 UA）──
 
-    private async Task<string?> PostJsonAsync<T>(string url, T payload, JsonTypeInfo<T> typeInfo,
-        CancellationToken ct)
+    private async Task<AuthHttpResponse> PostJsonAsync<T>(string url, T payload,
+        JsonTypeInfo<T> typeInfo, CancellationToken ct)
     {
         try
         {
@@ -162,17 +172,37 @@ public sealed class GlaccAuthClient
                 ["content-type"] = "application/json; charset=utf-8",
             };
             var body = JsonSerializer.Serialize(payload, typeInfo);
-            var resp = await Task.Run(() => GlaccTls.Send(
-                new TlsRequestPayload(
-                    GlaccDevicePool.IdentifierFor(device), "POST", url, body,
-                    headers, [.. headers.Keys], 15, true, true, false, false, true),
-                out _), ct);
-            return resp?.Body;
+            var tls = new TlsRequestPayload(
+                GlaccDevicePool.IdentifierFor(device), "POST", url, body,
+                headers, [.. headers.Keys], 15, true, true, false, false, true);
+            var resp = await Task.Run(() => GlaccTls.Send(tls, out _), ct);
+            return new AuthHttpResponse(resp?.Body, resp?.Status ?? 0);
         }
         catch (Exception)
         {
+            return new AuthHttpResponse(null, 0);
+        }
+    }
+
+    /// <summary>解析响应体；非 JSON（如网关错误页）返回 null，避免异常外泄到业务层。</summary>
+    private static JsonDocument? TryParse(string? body)
+    {
+        if (string.IsNullOrEmpty(body)) return null;
+        try
+        {
+            return JsonDocument.Parse(body);
+        }
+        catch
+        {
             return null;
         }
+    }
+
+    /// <summary>一次 POST 的原始结果：<see cref="Body"/> 为 null 表示未取得响应（网络层失败）。</summary>
+    private readonly record struct AuthHttpResponse(string? Body, int Status)
+    {
+        /// <summary>未取得响应或服务端 5xx：网络层失败，未产生业务判定。</summary>
+        public bool Transient => Body is null || Status >= 500;
     }
 
     private static string DescribeError(JsonElement root)

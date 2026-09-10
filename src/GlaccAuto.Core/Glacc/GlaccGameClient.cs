@@ -26,7 +26,7 @@ public sealed class GlaccGameClient
         Func<int, TimeSpan, Task>? onRetry = null,
         CancellationToken ct = default)
     {
-        if (!_cred.HasToken) return Task.FromResult(Fail<List<GlaccTaskStage>>());
+        if (!_cred.HasToken) return Task.FromResult(NotLoggedIn<List<GlaccTaskStage>>());
         var url = $"{GlaccConstants.GameBase}/xlppc.gacs/api/gxsdn/act/advert/mobileGLTaskList?appid={GlaccConstants.AppId}";
         return _session.RunAsync(c => SendAsync(HttpMethod.Get, url, null, c), ParseStages,
             accept, onRetry, ct);
@@ -37,7 +37,7 @@ public sealed class GlaccGameClient
         Func<int, TimeSpan, Task>? onRetry = null,
         CancellationToken ct = default)
     {
-        if (!_cred.HasToken) return Task.FromResult(Fail<long>());
+        if (!_cred.HasToken) return Task.FromResult(NotLoggedIn<long>());
         var url = $"{GlaccConstants.GameBase}/xlppc.gacs/api/gxsdn/gold/get_user_wallet";
         return _session.RunAsync(c => SendAsync(HttpMethod.Get, url, null, c), ParseWallet,
             null, onRetry, ct);
@@ -48,7 +48,7 @@ public sealed class GlaccGameClient
         Func<int, TimeSpan, Task>? onRetry = null,
         CancellationToken ct = default)
     {
-        if (!_cred.HasToken) return Task.FromResult(Fail<GlaccPushResult>());
+        if (!_cred.HasToken) return Task.FromResult(NotLoggedIn<GlaccPushResult>());
         var url = $"{GlaccConstants.GameBase}/xlppc.gacs/api/gxsdn/act/advert/mobileGLTaskPush";
         return _session.RunAsync(
             c =>
@@ -115,7 +115,9 @@ public sealed class GlaccGameClient
         return new GlaccPushResult(code, addScore, taskName);
     }
 
-    private static GlaccCallResult<T> Fail<T>() => GlaccCallResult<T>.Fail(GlaccFailReason.Network);
+    /// <summary>本地无凭证的短路结果：与网络失败区分，供上层引导登录而非提示网络异常。</summary>
+    private static GlaccCallResult<T> NotLoggedIn<T>() =>
+        GlaccCallResult<T>.Fail(GlaccFailReason.NotLoggedIn);
 
     // ── HTTP 基础设施（game-xacc 通用头，抓包 §四；走 GlaccTls：OkHttp/Android TLS 指纹）──
 

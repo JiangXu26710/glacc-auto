@@ -146,6 +146,16 @@ public partial class MainWindow : Window
         _vm.CancelExitCommand.Execute(null);
     }
 
+    /// <summary>
+    /// 点击登录对话框遮罩：取消登录。验证码步骤忽略遮罩点击，
+    /// 避免误触把已发出的验证码作废、需重新发送。
+    /// </summary>
+    private void OnLoginScrimPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (_vm.LoginCodeStep) return;
+        _vm.CancelLoginCommand.Execute(null);
+    }
+
     /// <summary>把诊断信息写入系统剪贴板；剪贴板被占用等失败情形静默忽略（界面已给反馈）。</summary>
     private async Task CopyToClipboardAsync(string text)
     {

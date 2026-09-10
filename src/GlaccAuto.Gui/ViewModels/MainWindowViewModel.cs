@@ -245,7 +245,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool SpinnerVisible => State == RunState.Running;
 
     public string ButtonText => !IsLoggedIn
-        ? "登录账号"
+        ? "请先登录"
         : State switch
         {
             RunState.Running => "正在领取",
@@ -819,7 +819,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private string _phoneInput = PhoneDigits("");
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasCodeInput))]
+    [NotifyPropertyChangedFor(nameof(CanConfirmLogin))]
     private string _codeInput = "";
 
     /// <summary>重发倒计时（秒），0 表示可发送</summary>
@@ -837,9 +837,8 @@ public partial class MainWindowViewModel : ViewModelBase
     private bool _isLoginBusy;
 
     public bool HasLoginError => !string.IsNullOrEmpty(LoginError);
-    public bool HasCodeInput => !string.IsNullOrWhiteSpace(CodeInput);
     public bool CanSendCode => ResendSeconds <= 0 && !IsLoginBusy;
-    public bool CanConfirmLogin => HasCodeInput && !IsLoginBusy;
+    public bool CanConfirmLogin => !string.IsNullOrWhiteSpace(CodeInput) && !IsLoginBusy;
     public string ResendText => ResendSeconds > 0 ? $"{ResendSeconds} 秒后可重新发送" : "重新发送验证码";
     public string SentToText => $"验证码已发送至 {PhoneMasked}，5 分钟内有效";
 
@@ -858,16 +857,14 @@ public partial class MainWindowViewModel : ViewModelBase
         ShowLoginDialog = true;
     }
 
+    /// <summary>关闭登录引导：停掉重发倒计时并清掉错误提示，重开时回到第一步手机号。</summary>
     [RelayCommand]
-    private void CancelLogin() => ShowLoginDialog = false;
-
-    [RelayCommand]
-    private void BackToPhone()
+    private void CancelLogin()
     {
+        ShowLoginDialog = false;
         StopResendTimer();
         ResendSeconds = 0;
         LoginError = "";
-        LoginCodeStep = false;
     }
 
     [RelayCommand]

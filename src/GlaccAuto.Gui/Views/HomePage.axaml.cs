@@ -20,8 +20,4 @@ public partial class HomePage : UserControl
     /// <summary>点击未登录账号区：打开登录引导</summary>
     private void LoginEntry_OnTapped(object? sender, TappedEventArgs e)
         => Vm.OpenLoginCommand.Execute(null);
-
-    /// <summary>点击登录对话框遮罩：取消登录</summary>
-    private void OnLoginScrimPressed(object? sender, PointerPressedEventArgs e)
-        => Vm.CancelLoginCommand.Execute(null);
 }

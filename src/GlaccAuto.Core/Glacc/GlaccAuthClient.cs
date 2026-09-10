@@ -24,8 +24,10 @@ public sealed class GlaccAuthClient
         var phone = NormalizePhone(phoneInput);
         if (phone is null) return GlaccResult.Fail("手机号格式不正确（应为 11 位大陆手机号）");
 
-        // 设备标识与设备档案由手机号派生，captcha 请求起就要用：先定下当前登录目标
-        _cred.Phone = phone;
+        // 设备标识与设备档案由手机号派生，captcha 请求起就要用：先定下当前登录目标。
+        // 只记 PendingPhone、不动 Phone：登录成功才转正，改号登录期间不影响已登录会话的显示与身份
+        _cred.PendingPhone = phone;
+        _cred.Save();
 
         var captcha = await CaptchaInitAsync("POST:/v1/auth/verification", phone, ct);
         if (captcha is null)
@@ -36,7 +38,7 @@ public sealed class GlaccAuthClient
 
         var resp = await PostJsonAsync($"{GlaccConstants.AuthBase}/v1/auth/verification",
             new VerificationRequest(captcha, GlaccConstants.ClientId, phone, "ANY", "SIGN_IN"),
-            GlaccJsonContext.Default.VerificationRequest, ct);
+            GlaccJsonContext.Default.VerificationRequest, ct, loginFlow: true);
         if (resp.Body is null)
         {
             DiagLog.Warn($"发送验证码失败（网络层）：{resp.Error}");
@@ -73,7 +75,7 @@ public sealed class GlaccAuthClient
         // 1) 验证码换 verification_token
         var vResp = await PostJsonAsync($"{GlaccConstants.AuthBase}/v1/auth/verification/verify",
             new VerifyCodeRequest(GlaccConstants.ClientId, vid, code),
-            GlaccJsonContext.Default.VerifyCodeRequest, ct);
+            GlaccJsonContext.Default.VerifyCodeRequest, ct, loginFlow: true);
         if (vResp.Body is null)
         {
             DiagLog.Warn($"验证码校验失败（网络层）：{vResp.Error}");
@@ -97,7 +99,7 @@ public sealed class GlaccAuthClient
         }
 
         // 2) signin（signin action 需要自己的 captcha_token）
-        var captcha = await CaptchaInitAsync("POST:/v1/auth/signin", _cred.Phone, ct);
+        var captcha = await CaptchaInitAsync("POST:/v1/auth/signin", _cred.LoginPhone, ct);
         if (captcha is null)
         {
             DiagLog.Warn("登录失败：未取得人机凭证");
@@ -106,8 +108,8 @@ public sealed class GlaccAuthClient
 
         var sResp = await PostJsonAsync($"{GlaccConstants.AuthBase}/v1/auth/signin",
             new SigninRequest(captcha, GlaccConstants.ClientId, GlaccConstants.ClientSecret,
-                _cred.Phone, verificationToken),
-            GlaccJsonContext.Default.SigninRequest, ct);
+                _cred.LoginPhone, verificationToken),
+            GlaccJsonContext.Default.SigninRequest, ct, loginFlow: true);
         if (sResp.Body is null)
         {
             DiagLog.Warn($"登录失败（网络层）：{sResp.Error}");
@@ -136,7 +138,9 @@ public sealed class GlaccAuthClient
         _cred.ObtainedAt = GlaccCredentials.NowSeconds();
         _cred.ExpiresIn = sRoot.TryGetProperty("expires_in", out var ei) && ei.TryGetInt32(out var sec)
             ? sec : 7200;
-        // 登录完成，清理一次性状态
+        // 登录完成：目标手机号转正，清理一次性状态
+        _cred.Phone = _cred.LoginPhone;
+        _cred.PendingPhone = "";
         _cred.VerificationId = "";
         _cred.VerificationIdAt = 0;
         _cred.Save();
@@ -203,26 +207,29 @@ public sealed class GlaccAuthClient
     {
         var resp = await PostJsonAsync(
             $"{GlaccConstants.AuthBase}/v1/shield/captcha/init?client_id={GlaccConstants.ClientId}",
-            new CaptchaInitRequest(action, GlaccConstants.ClientId, _cred.DeviceId,
+            new CaptchaInitRequest(action, GlaccConstants.ClientId, _cred.LoginDeviceId,
                 new CaptchaMeta(phone), GlaccConstants.RedirectUri),
-            GlaccJsonContext.Default.CaptchaInitRequest, ct);
+            GlaccJsonContext.Default.CaptchaInitRequest, ct, loginFlow: true);
         if (resp.Body is null) return null;
         using var doc = TryParse(resp.Body);
         return doc is not null && doc.RootElement.TryGetProperty("captcha_token", out var t)
             ? t.GetString() : null;
     }
 
-    // ── HTTP 基础设施（走 GlaccTls：OkHttp/Android TLS 指纹 + 设备档案 UA）──
-
+    /// <summary>
+    /// 认证链路的请求主体（走 GlaccTls：OkHttp/Android TLS 指纹 + 设备档案 UA）。
+    /// 短信登录流程（发码/验码/signin）传 loginFlow = true：设备身份跟随待登录手机号；
+    /// 其余（refresh）跟随已登录账号，改号登录进行中不影响既有会话的请求身份。
+    /// </summary>
     private async Task<AuthHttpResponse> PostJsonAsync<T>(string url, T payload,
-        JsonTypeInfo<T> typeInfo, CancellationToken ct)
+        JsonTypeInfo<T> typeInfo, CancellationToken ct, bool loginFlow = false)
     {
         try
         {
-            var device = _cred.Device;
+            var device = loginFlow ? _cred.LoginDevice : _cred.Device;
             var headers = new Dictionary<string, string>
             {
-                ["x-device-id"] = _cred.DeviceId,
+                ["x-device-id"] = loginFlow ? _cred.LoginDeviceId : _cred.DeviceId,
                 ["user-agent"] = GlaccUa.Auth(device),
                 ["accept-language"] = "zh-CN",
                 ["content-type"] = "application/json; charset=utf-8",

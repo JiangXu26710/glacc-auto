@@ -99,7 +99,7 @@ public partial class MainWindowViewModel : ViewModelBase
         : null;
 
     // 版式化余额：数字与单位分开排版，增强设计感；分钟两位补零（9 → 09）。
-    // 余额 = 钱包 score，按 1 score = 1 分钟换算（待实测校准）；未登录或尚未取到余额时显示占位符 "--"。
+    // 余额 = 钱包 score，按 80 score = 1 分钟换算；未登录或尚未取到余额时显示占位符 "--"。
     public int BalanceHours
     {
         get { var t = (int)Math.Round(BalanceMinutes); return t / 60; }
@@ -543,7 +543,9 @@ public partial class MainWindowViewModel : ViewModelBase
         // 对账①：开始前拉最新进度，确定阶段一的剩余领取次数（避免与他处已完成的重复推送）。
         // 对账总次数 = 剩余阶段数 + 开头 1 次：开头这次定阶段一领几次，之后每次阶段结束对账
         // 顺带定出下一阶段领几次；末阶段的结束对账即收尾，不再重复查询。
-        var fresh = await _game.GetTaskStagesAsync(
+        // 运行期空列表视为查询失败（与下方对账②口径一致）：StartAsync 已确认过非空，
+        // 此处若照单全收会把"服务端清空进度"误判成 0>=0 已完成，空跑一次还发成功通知。
+        var fresh = await _game.GetTaskStagesAsync(accept: s => s is { Count: > 0 },
             onRetry: (a, w) => OnRetryNoticeAsync("任务进度查询", a, w));
         if (!TryHandle(fresh, "已中断")) return;
         ApplyStages(fresh.Value!);
@@ -931,7 +933,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool CanSendCode => ResendSeconds <= 0 && !IsLoginBusy;
     public bool CanConfirmLogin => !string.IsNullOrWhiteSpace(CodeInput) && !IsLoginBusy;
     public string ResendText => ResendSeconds > 0 ? $"{ResendSeconds} 秒后可重新发送" : "重新发送验证码";
-    public string SentToText => $"验证码已发送至 {PhoneMasked}，5 分钟内有效";
+    public string SentToText => $"验证码已发送至 {MaskPhone(PhoneDigits(_cred.LoginPhone))}，5 分钟内有效";
 
     private DispatcherTimer? _resendTimer;
 
@@ -944,7 +946,7 @@ public partial class MainWindowViewModel : ViewModelBase
         LoginError = "";
         IsLoginBusy = false;
         ResendSeconds = 0;
-        PhoneInput = PhoneDigits(_cred.Phone);
+        PhoneInput = PhoneDigits(_cred.LoginPhone);
         ShowLoginDialog = true;
     }
 

@@ -88,24 +88,32 @@ public static class GlaccTls
                 error = "TLS 库返回空响应";
                 return null;
             }
-            using var doc = JsonDocument.Parse(respJson);
-            var root = doc.RootElement;
-            var status = root.TryGetProperty("status", out var st) ? st.GetInt32() : 0;
-            var body = root.TryGetProperty("body", out var b) ? b.GetString() ?? "" : "";
-            var id = root.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
-            if (!string.IsNullOrEmpty(id))
+            // 响应 JSON 来自网络对端，解析可能失败：freeMemory 必须保证执行，否则每次泄漏原生缓冲
+            string? id = null;
+            try
             {
-                try { _freeMemory(id); } catch { /* 释放失败不影响结果 */ }
+                using var doc = JsonDocument.Parse(respJson);
+                var root = doc.RootElement;
+                var status = root.TryGetProperty("status", out var st) ? st.GetInt32() : 0;
+                var body = root.TryGetProperty("body", out var b) ? b.GetString() ?? "" : "";
+                id = root.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                // 传输层未成功（DNS 不解析 / 连接被拒 / 超时等）不发生 HTTP 交互：原生库以 status=0 表达，
+                // Go 侧错误文本放在 body。此时根本不存在"服务端响应"，必须与"取到响应但解析失败"区分，
+                // 否则会把断网误报成"接口已变更"。
+                if (status <= 0)
+                {
+                    error = body.Length > 0 ? body : "网络不可达或超时（原生库未给出原因）";
+                    return null;
+                }
+                return new GlaccTlsResponse(status, body);
             }
-            // 传输层未成功（DNS 不解析 / 连接被拒 / 超时等）不发生 HTTP 交互：原生库以 status=0 表达，
-            // Go 侧错误文本放在 body。此时根本不存在"服务端响应"，必须与"取到响应但解析失败"区分，
-            // 否则会把断网误报成"接口已变更"。
-            if (status <= 0)
+            finally
             {
-                error = body.Length > 0 ? body : "网络不可达或超时（原生库未给出原因）";
-                return null;
+                if (!string.IsNullOrEmpty(id))
+                {
+                    try { _freeMemory(id); } catch { /* 释放失败不影响结果 */ }
+                }
             }
-            return new GlaccTlsResponse(status, body);
         }
         catch (GlaccTlsUnavailableException)
         {

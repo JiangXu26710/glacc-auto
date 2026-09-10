@@ -97,6 +97,14 @@ public static class GlaccTls
             {
                 try { _freeMemory(id); } catch { /* 释放失败不影响结果 */ }
             }
+            // 传输层未成功（DNS 不解析 / 连接被拒 / 超时等）不发生 HTTP 交互：原生库以 status=0 表达，
+            // Go 侧错误文本放在 body。此时根本不存在"服务端响应"，必须与"取到响应但解析失败"区分，
+            // 否则会把断网误报成"接口已变更"。
+            if (status <= 0)
+            {
+                error = body.Length > 0 ? body : "网络不可达或超时（原生库未给出原因）";
+                return null;
+            }
             return new GlaccTlsResponse(status, body);
         }
         catch (GlaccTlsUnavailableException)

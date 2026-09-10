@@ -346,12 +346,14 @@ public partial class MainWindowViewModel : ViewModelBase
     /// <summary>拉取任务进度 + 钱包余额并刷新 UI；返回是否取得任务进度。</summary>
     private async Task<bool> RefreshSnapshotAsync()
     {
-        var stages = await _game.GetTaskStagesAsync();
+        var stages = await _game.GetTaskStagesAsync(
+            onRetry: (a, w) => OnRetryNoticeAsync("任务进度查询", a, w));
         if (!TryHandle(stages, "无法同步任务进度")) return false;
         ApplyStages(stages.Value!);
         ClearStatus();
 
-        var score = await _game.GetWalletScoreAsync();
+        var score = await _game.GetWalletScoreAsync(
+            onRetry: (a, w) => OnRetryNoticeAsync("余额查询", a, w));
         if (!ApplyWallet(score)) return false;
         return true;
     }
@@ -388,7 +390,8 @@ public partial class MainWindowViewModel : ViewModelBase
         BalanceBusy = true;
         try
         {
-            var score = await _game.GetWalletScoreAsync();
+            var score = await _game.GetWalletScoreAsync(
+                onRetry: (a, w) => OnRetryNoticeAsync("余额查询", a, w));
             if (!ApplyWallet(score)) return;
             if (score.Ok) DiagLog.Info($"余额已刷新：{BalanceSummary}");
         }
@@ -401,6 +404,17 @@ public partial class MainWindowViewModel : ViewModelBase
     /// <summary>清空状态栏（成功与进行中路径）。</summary>
     private void ClearStatus() => SetStatus("");
 
+    /// <summary>
+    /// 请求失败、即将自动重试时的状态栏提示：让用户知道程序仍在重试而不是卡住了
+    /// （退避 2/4/8/16/32/64 秒，断网时最长会静默等待两分钟）。
+    /// </summary>
+    /// <param name="what">业务描述，如"任务进度""余额""阶段一 推送"</param>
+    private Task OnRetryNoticeAsync(string what, int attempt, TimeSpan wait)
+    {
+        SetStatus($"网络波动：{what}失败，{wait.TotalSeconds:0} 秒后自动重试（第 {attempt} 次）");
+        return Task.CompletedTask;
+    }
+
     /// <summary>写状态栏：文案 + 技术细节 + 严重度（isError = 需要用户处理，界面按错误色呈现）。</summary>
     private void SetStatus(string text, string detail = "", bool isError = false)
     {
@@ -412,7 +426,7 @@ public partial class MainWindowViewModel : ViewModelBase
     /// <summary>失败原因 → 用户可读文案；技术细节另行给出（悬浮提示与"复制错误信息"）。</summary>
     private static string DescribeFailure(GlaccFailReason reason) => reason switch
     {
-        GlaccFailReason.NoResponse => "网络请求失败：无法连接服务器",
+        GlaccFailReason.NoResponse => "网络不可用：无法连接服务器",
         GlaccFailReason.ServerError => "服务端暂时不可用（HTTP 5xx）",
         GlaccFailReason.BadResponse => "服务端响应无法解析：接口可能已变更",
         GlaccFailReason.ClientError => "本机网络组件异常：TLS 指纹库不可用",
@@ -524,14 +538,16 @@ public partial class MainWindowViewModel : ViewModelBase
         // 对账①：开始前拉最新进度，确定阶段一的剩余领取次数（避免与他处已完成的重复推送）。
         // 对账总次数 = 剩余阶段数 + 开头 1 次：开头这次定阶段一领几次，之后每次阶段结束对账
         // 顺带定出下一阶段领几次；末阶段的结束对账即收尾，不再重复查询。
-        var fresh = await _game.GetTaskStagesAsync();
+        var fresh = await _game.GetTaskStagesAsync(
+            onRetry: (a, w) => OnRetryNoticeAsync("任务进度查询", a, w));
         if (!TryHandle(fresh, "已中断")) return;
         ApplyStages(fresh.Value!);
         if (ClaimIndex >= TotalClaims)
         {
             // 开头对账即今日已全部完成：无末阶段收尾，这里补查一次钱包刷新余额
             DiagLog.Info("对账显示今日任务已完成，无需领取");
-            if (!ApplyWallet(await _game.GetWalletScoreAsync())) return;
+            if (!ApplyWallet(await _game.GetWalletScoreAsync(
+                    onRetry: (a, w) => OnRetryNoticeAsync("余额查询", a, w)))) return;
             CompleteScheduledRun();
             return;
         }
@@ -548,11 +564,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
                 // 每个 push 请求的重试预算与 JWT 续期由 GlaccSession 统一处理，失败提示走回调
                 var push = await _game.PushTaskAsync(stage.TaskId,
-                    onRetry: (_, wait) =>
-                    {
-                        SetStatus($"网络波动：{stage.Name} 推送失败，{wait.TotalSeconds:0} 秒后重试");
-                        return Task.CompletedTask;
-                    });
+                    onRetry: (a, w) => OnRetryNoticeAsync($"{stage.Name} 推送", a, w));
                 if (!TryHandle(push, "已中断")) return;
                 if (State != RunState.Running) break;
 
@@ -584,7 +596,8 @@ public partial class MainWindowViewModel : ViewModelBase
             if (State != RunState.Running) break;
             await Task.Delay(TimeSpan.FromSeconds(3));
             // 运行期空列表视为查询失败：对账中服务端不应清空进度
-            var server = await _game.GetTaskStagesAsync(accept: s => s is { Count: > 0 });
+            var server = await _game.GetTaskStagesAsync(accept: s => s is { Count: > 0 },
+                onRetry: (a, w) => OnRetryNoticeAsync("任务进度对账", a, w));
             if (!TryHandle(server, "已中断")) return;
             var serverStages = server.Value!;
             var serverCount = serverStages.Sum(s => s.StageCurrent);
@@ -604,7 +617,8 @@ public partial class MainWindowViewModel : ViewModelBase
         if (State == RunState.Running)
         {
             // 收尾：末阶段的结束对账已同步服务端进度，这里只刷新钱包余额
-            if (!ApplyWallet(await _game.GetWalletScoreAsync())) return;
+            if (!ApplyWallet(await _game.GetWalletScoreAsync(
+                    onRetry: (a, w) => OnRetryNoticeAsync("余额查询", a, w)))) return;
             CompleteScheduledRun();
             // 完成态提示由任务卡副标题（StageText）唯一表达，状态栏直接清空避免重复
             ClearStatus();

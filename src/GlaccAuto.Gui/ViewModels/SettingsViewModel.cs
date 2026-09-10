@@ -1,6 +1,7 @@
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using GlaccAuto.Core;
+using GlaccAuto.Core.Diagnostics;
 using GlaccAuto.Core.Scheduling;
 
 namespace GlaccAuto.Gui.ViewModels;
@@ -146,6 +147,7 @@ public partial class SettingsViewModel : ViewModelBase
             catch (Exception ex)
             {
                 // 注册失败：回滚开关与持久化值，卡片内提示原因
+                DiagLog.Error("定时任务注册失败", ex);
                 ScheduleError = $"定时任务注册失败：{ex.Message}";
                 _suppressScheduleEvents = true;
                 ScheduledEnabled = false;
@@ -162,6 +164,7 @@ public partial class SettingsViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
+                DiagLog.Error("定时任务注销失败", ex);
                 ScheduleError = $"定时任务注销失败：{ex.Message}";
             }
         }
@@ -179,6 +182,7 @@ public partial class SettingsViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagLog.Error("定时任务更新失败", ex);
             ScheduleError = $"定时任务更新失败：{ex.Message}";
         }
     }

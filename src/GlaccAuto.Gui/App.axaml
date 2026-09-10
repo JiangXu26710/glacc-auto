@@ -273,6 +273,82 @@
       <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
     </Style>
 
+    <!-- 图标按钮：24×24 热区，透明底，悬停浮起（状态栏复制等小动作） -->
+    <Style Selector="Button.iconBtn">
+      <Setter Property="Width" Value="24"/>
+      <Setter Property="Height" Value="24"/>
+      <Setter Property="MinWidth" Value="0"/>
+      <Setter Property="MinHeight" Value="0"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="Background" Duration="0:0:0.15"/>
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Button.iconBtn:pointerover">
+      <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}"/>
+    </Style>
+    <Style Selector="Button.iconBtn:pressed">
+      <Setter Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}"/>
+    </Style>
+
+    <!-- 状态栏文案：默认次要色（提示/结果档），整栏加 error 类时转为错误色（红）。
+         颜色切换带过渡，随档位切换平滑变色。 -->
+    <Style Selector="TextBlock.statusText">
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="Foreground" Duration="0:0:0.2"/>
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="StackPanel.status.error TextBlock.statusText">
+      <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
+    </Style>
+
+    <!-- 状态栏复制图标：跟随整栏档位（默认次要色，错误档转错误色） -->
+    <Style Selector="TextBlock.statusIcon">
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="Foreground" Duration="0:0:0.2"/>
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="StackPanel.status.error TextBlock.statusIcon">
+      <Setter Property="Foreground" Value="{DynamicResource ErrorBrush}"/>
+    </Style>
+
+    <!-- 行内文字按钮（余额卡"未同步 · 重试"等就地操作）：透明底，悬停浮起 -->
+    <Style Selector="Button.linkBtn">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Padding" Value="4,2"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="MinWidth" Value="0"/>
+      <Setter Property="MinHeight" Value="0"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="Background" Duration="0:0:0.15"/>
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Button.linkBtn:pointerover">
+      <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}"/>
+    </Style>
+    <Style Selector="Button.linkBtn:pressed">
+      <Setter Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}"/>
+    </Style>
+
     <!-- 页面入场：淡入 + 上移 24px（Win11 页面导航 Decelerate 风格） -->
     <Style Selector="StackPanel.pageContent, Grid.pageContent">
       <Style.Animations>

@@ -4,8 +4,10 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform;
 using Avalonia.Styling;
+using Avalonia.Threading;
 using FluentAvalonia.Styling;
 using GlaccAuto.Core;
+using GlaccAuto.Core.Diagnostics;
 using GlaccAuto.Gui.ViewModels;
 
 namespace GlaccAuto.Gui;
@@ -19,6 +21,10 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        // 界面线程异常：先落日志，再按原有语义继续抛出（不吞异常，避免状态不一致）
+        Dispatcher.UIThread.UnhandledException += (_, e) =>
+            DiagLog.Error("界面线程未处理异常", e.Exception);
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             // FluentAvalonia 默认跟随系统强调色；统一为应用令牌 #0078D4 保持一致

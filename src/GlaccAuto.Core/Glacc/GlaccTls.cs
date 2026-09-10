@@ -43,11 +43,11 @@ public static class GlaccTls
             ];
             var dllPath = probes.FirstOrDefault(File.Exists);
             if (dllPath is null)
-                throw new DllNotFoundException(
+                throw new GlaccTlsUnavailableException(
                     "未找到 TLS 指纹库 tls-client.dll，请重新安装应用（勿删除 runtimes 目录）。");
             var module = LoadLibraryW(dllPath);
             if (module == IntPtr.Zero)
-                throw new DllNotFoundException(
+                throw new GlaccTlsUnavailableException(
                     $"加载 TLS 指纹库失败：{dllPath}（Win32Error={Marshal.GetLastWin32Error()}）");
             _request = GetDelegate<RequestDelegate>(module, "request");
             _freeMemory = GetDelegate<FreeMemoryDelegate>(module, "freeMemory");
@@ -59,7 +59,7 @@ public static class GlaccTls
     {
         var ptr = GetProcAddress(module, name);
         return ptr == IntPtr.Zero
-            ? throw new EntryPointNotFoundException($"TLS 指纹库缺少导出函数：{name}")
+            ? throw new GlaccTlsUnavailableException($"TLS 指纹库缺少导出函数：{name}")
             : Marshal.GetDelegateForFunctionPointer<T>(ptr);
     }
 
@@ -99,11 +99,24 @@ public static class GlaccTls
             }
             return new GlaccTlsResponse(status, body);
         }
+        catch (GlaccTlsUnavailableException)
+        {
+            // 本机指纹库故障：向上抛出，由调用方与网络故障区分处理
+            throw;
+        }
         catch (Exception ex)
         {
             error = ex.Message;
             return null;
         }
+    }
+}
+
+/// <summary>本机 TLS 指纹库不可用（缺失 / 无法加载 / 缺少导出函数）：属客户端环境故障，与网络故障区分。</summary>
+public sealed class GlaccTlsUnavailableException : Exception
+{
+    public GlaccTlsUnavailableException(string message) : base(message)
+    {
     }
 }
 

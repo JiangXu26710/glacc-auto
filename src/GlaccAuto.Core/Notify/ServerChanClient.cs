@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using GlaccAuto.Core.Diagnostics;
 
 namespace GlaccAuto.Core.Notify;
 
@@ -25,7 +26,11 @@ public static partial class ServerChanClient
     public static async Task<bool> SendAsync(string sendKey, string title, string desp)
     {
         sendKey = sendKey.Trim();
-        if (!SendKeyPattern().IsMatch(sendKey)) return false;
+        if (!SendKeyPattern().IsMatch(sendKey))
+        {
+            DiagLog.Warn("Server酱通知未发送：SendKey 格式无效");
+            return false;
+        }
         if (title.Length > 32) title = title[..32];
         try
         {
@@ -35,16 +40,27 @@ public static partial class ServerChanClient
                 new KeyValuePair<string, string>("desp", desp),
             ]);
             using var resp = await Http.PostAsync($"{ApiBase}/{sendKey}.send", content);
-            if (!resp.IsSuccessStatusCode) return false;
+            if (!resp.IsSuccessStatusCode)
+            {
+                DiagLog.Warn($"Server酱通知发送失败：HTTP {(int)resp.StatusCode}");
+                return false;
+            }
             using var doc = await JsonDocument.ParseAsync(await resp.Content.ReadAsStreamAsync());
-            return doc.RootElement.ValueKind == JsonValueKind.Object
+            var ok = doc.RootElement.ValueKind == JsonValueKind.Object
                 && doc.RootElement.TryGetProperty("code", out var code)
                 && code.ValueKind == JsonValueKind.Number
                 && code.GetInt32() == 0;
+            if (!ok)
+            {
+                var raw = doc.RootElement.TryGetProperty("code", out var c) ? c.GetRawText() : "无 code";
+                DiagLog.Warn($"Server酱通知被拒绝：code={raw}");
+            }
+            return ok;
         }
-        catch
+        catch (Exception ex)
         {
-            // 通知失败不影响主流程
+            // 通知失败不影响主流程，仅落日志
+            DiagLog.Warn($"Server酱通知发送异常：{ex.GetType().Name}: {ex.Message}");
             return false;
         }
     }

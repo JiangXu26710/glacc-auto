@@ -98,7 +98,20 @@
                        Foreground="{DynamicResource AccentBrush}" Opacity="0.07"
                        HorizontalAlignment="Right" VerticalAlignment="Center"/>
             <StackPanel Spacing="6">
-              <TextBlock Text="可用时长" Classes="cardCaption"/>
+              <!-- 标签行：左侧标题；右侧余额未同步时就地给出原因与重试入口 -->
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <TextBlock Grid.Column="0" Text="可用时长" Classes="cardCaption"
+                           VerticalAlignment="Center"/>
+                <Button Grid.Column="2" Classes="linkBtn"
+                        Command="{Binding RetryBalanceCommand}"
+                        IsVisible="{Binding HasBalanceHint}"
+                        IsEnabled="{Binding !BalanceBusy}"
+                        ToolTip.Tip="{Binding BalanceHintTooltip}"
+                        VerticalAlignment="Center">
+                  <TextBlock Text="未同步 · 重试" FontSize="12"
+                             Foreground="{DynamicResource ErrorBrush}"/>
+                </Button>
+              </Grid>
               <StackPanel Orientation="Horizontal" Spacing="0" Margin="0,4,0,2">
                 <controls:AnimatedTextBlock Text="{Binding BalanceHoursText}"
                                             FontFamily="{DynamicResource FontDisplay}"
@@ -149,19 +162,31 @@
         </Border>
       </StackPanel>
 
-      <!-- 状态栏：网络/服务端提示与领取结果。
-           位于 0 高度行、向下溢出绘制，不占布局空间（上方组位置恒定），淡入过渡。 -->
-      <TextBlock Grid.Row="1" Text="{Binding StatusText}" Classes="cardCaption"
-                 VerticalAlignment="Top" Margin="0,12,0,0"
-                 HorizontalAlignment="Center" TextAlignment="Center"
-                 MaxWidth="480" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                 IsHitTestVisible="False" Opacity="{Binding StatusOpacity}">
-        <TextBlock.Transitions>
+      <!-- 状态栏：网络/服务端提示与领取结果，悬浮显示完整文案与技术细节，右侧可复制。
+           按严重度着色：需用户处理（请求失败/需重新登录）转错误色，其余保持次要色。
+           位于 0 高度行、向下溢出绘制，不占布局空间（上方组位置恒定），淡入过渡。
+           负的下外边距把可命中的高度还给内容：0 高度行会把直接子元素压成 0 高，
+           悬浮提示与复制按钮将收不到指针事件；视觉位置与原先一致。 -->
+      <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="4"
+                  Classes="status" Classes.error="{Binding StatusIsError}"
+                  VerticalAlignment="Top" Margin="0,12,0,-40"
+                  HorizontalAlignment="Center" Opacity="{Binding StatusOpacity}">
+        <StackPanel.Transitions>
           <Transitions>
             <DoubleTransition Property="Opacity" Duration="0:0:0.25" Easing="0,0,0,1"/>
           </Transitions>
-        </TextBlock.Transitions>
-      </TextBlock>
+        </StackPanel.Transitions>
+        <TextBlock Text="{Binding StatusText}" Classes="statusText"
+                   VerticalAlignment="Center" TextAlignment="Center"
+                   MaxWidth="452" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                   ToolTip.Tip="{Binding StatusTooltip}"/>
+        <Button Classes="iconBtn" Command="{Binding CopyStatusCommand}"
+                IsVisible="{Binding CanCopyStatus}" ToolTip.Tip="复制错误信息"
+                VerticalAlignment="Center">
+          <TextBlock FontFamily="{DynamicResource FontIcons}" Text="&#xE8C8;" FontSize="13"
+                     Classes="statusIcon"/>
+        </Button>
+      </StackPanel>
 
       <!-- 领取按钮：状态栏出现时下移避让（RenderTransform 位移不参与布局，故不推动上方内容） -->
       <Button Grid.Row="2" Classes="accent" Command="{Binding StartCommand}"

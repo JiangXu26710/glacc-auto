@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Threading;
 using Avalonia;
+using GlaccAuto.Core.Diagnostics;
 
 namespace GlaccAuto.Gui;
 
@@ -18,11 +19,24 @@ internal static class Program
     [DllImport("user32.dll")]
     private static extern bool AllowSetForegroundWindow(int dwProcessId);
 
+    /// <summary>致命错误提示框（MB_ICONERROR = 0x10）</summary>
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+
     private static Mutex? _singleInstance;
 
     [STAThread]
     public static int Main(string[] args)
     {
+        DiagLog.Prune();
+        DiagLog.Info($"启动 {AppInfo.VersionText}，{RuntimeInformation.FrameworkDescription}，{RuntimeInformation.OSDescription}");
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            DiagLog.Error("未处理异常，进程即将退出", e.ExceptionObject as Exception);
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            DiagLog.Error("后台任务未观察到的异常", e.Exception);
+            e.SetObserved();
+        };
         if (!OperatingSystem.IsWindows()) return 1;
         var scheduled = args.Any(a => a.Equals("--scheduled", StringComparison.OrdinalIgnoreCase));
         _singleInstance = new Mutex(true, @"Local\glacc-auto-single", out var isFirst);
@@ -39,6 +53,7 @@ internal static class Program
                 catch
                 {
                     // 运行中实例刚退出等边界情况：放弃本次定时领取
+                    DiagLog.Warn("到点领取：未找到运行中实例的领取信号，本次放弃");
                 }
             }
             else
@@ -54,12 +69,38 @@ internal static class Program
                 catch
                 {
                     // 运行中实例尚未就绪：本次唤醒放弃
+                    DiagLog.Warn("唤出窗口：未找到运行中实例的窗口信号，本次放弃");
                 }
             }
             return 0;
         }
-        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
-        return 0;
+        try
+        {
+            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+            DiagLog.Info("正常退出");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            DiagLog.Error("应用异常退出", ex);
+            FatalDialog(ex);
+            return 2;
+        }
+    }
+
+    /// <summary>致命错误提示：应用起不来时除日志外再弹系统提示框，告知日志文件位置。</summary>
+    private static void FatalDialog(Exception ex)
+    {
+        try
+        {
+            MessageBoxW(IntPtr.Zero,
+                $"glacc-auto 启动失败：{ex.Message}\n\n诊断日志：{DiagLog.CurrentFilePath}",
+                "glacc-auto", 0x10);
+        }
+        catch
+        {
+            // 提示框不可用时仅保留日志
+        }
     }
 
     public static AppBuilder BuildAvaloniaApp()

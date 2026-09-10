@@ -3,6 +3,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using GlaccAuto.Core;
+using GlaccAuto.Core.Diagnostics;
 using GlaccAuto.Core.Glacc;
 using GlaccAuto.Core.Notify;
 using GlaccAuto.Core.Scheduling;
@@ -51,6 +52,9 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool ExitConfirmed { get; set; }
     public event Action? CloseRequested;
 
+    /// <summary>请求把诊断信息写入系统剪贴板（剪贴板由视图提供）</summary>
+    public event Action<string>? CopyRequested;
+
     /// <summary>设置页缩放变更 → MainWindow 应用缩放并弹出保护确认</summary>
     public event Action<int>? ScaleChangeRequested;
 
@@ -68,18 +72,46 @@ public partial class MainWindowViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(BalanceMinutesText))]
     private double _balanceMinutes;
 
+    /// <summary>是否成功取到过余额：决定余额区显示真实数字还是占位符（避免把"没查到"显示成 0 时 00 分）</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(BalanceHoursText))]
+    [NotifyPropertyChangedFor(nameof(BalanceMinutesText))]
+    [NotifyPropertyChangedFor(nameof(HasBalanceHint))]
+    [NotifyPropertyChangedFor(nameof(BalanceHintTooltip))]
+    private bool _balanceFetched;
+
+    /// <summary>余额未同步原因（空 = 尚未查过或上次查询成功）；非空时余额卡标签行出现"未同步 · 重试"入口</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasBalanceHint))]
+    [NotifyPropertyChangedFor(nameof(BalanceHintTooltip))]
+    private string _balanceHint = "";
+
+    /// <summary>重试查询进行中：避免连点发起并发请求</summary>
+    [ObservableProperty]
+    private bool _balanceBusy;
+
+    /// <summary>已登录但余额未知（查询失败，或因任务进度拉取失败而根本没查过）→ 给出就地重试入口</summary>
+    public bool HasBalanceHint => IsLoggedIn && !BalanceFetched;
+
+    public string? BalanceHintTooltip => HasBalanceHint
+        ? $"{(BalanceHint.Length > 0 ? BalanceHint : "尚未取到余额")}{Environment.NewLine}点击重试"
+        : null;
+
     // 版式化余额：数字与单位分开排版，增强设计感；分钟两位补零（9 → 09）。
-    // 余额 = 钱包 score，按 1 score = 1 分钟换算（待实测校准）；未登录显示占位符 "--"。
+    // 余额 = 钱包 score，按 1 score = 1 分钟换算（待实测校准）；未登录或尚未取到余额时显示占位符 "--"。
     public int BalanceHours
     {
         get { var t = (int)Math.Round(BalanceMinutes); return t / 60; }
     }
 
-    public string BalanceHoursText => IsLoggedIn ? BalanceHours.ToString() : "--";
+    public string BalanceHoursText => BalanceKnown ? BalanceHours.ToString() : "--";
 
-    public string BalanceMinutesText => IsLoggedIn
+    public string BalanceMinutesText => BalanceKnown
         ? ((int)Math.Round(BalanceMinutes) % 60).ToString("D2")
         : "--";
+
+    /// <summary>余额可信：已登录且成功取到过余额</summary>
+    private bool BalanceKnown => IsLoggedIn && BalanceFetched;
 
     // ── 登录态 ──
 
@@ -87,6 +119,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(AccountName))]
     [NotifyPropertyChangedFor(nameof(BalanceHoursText))]
     [NotifyPropertyChangedFor(nameof(BalanceMinutesText))]
+    [NotifyPropertyChangedFor(nameof(HasBalanceHint))]
     [NotifyPropertyChangedFor(nameof(ProgressCurrentText))]
     [NotifyPropertyChangedFor(nameof(ProgressTotalText))]
     [NotifyPropertyChangedFor(nameof(StageText))]
@@ -164,9 +197,42 @@ public partial class MainWindowViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(HasStatusText))]
     [NotifyPropertyChangedFor(nameof(StatusOffset))]
     [NotifyPropertyChangedFor(nameof(StatusOpacity))]
+    [NotifyPropertyChangedFor(nameof(StatusTooltip))]
+    [NotifyPropertyChangedFor(nameof(CanCopyStatus))]
     private string _statusText = "";
 
+    /// <summary>状态栏提示对应的技术细节（异常类型与信息、服务端 code 等），供悬浮提示与"复制错误信息"</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StatusTooltip))]
+    [NotifyPropertyChangedFor(nameof(HasStatusDetail))]
+    private string _statusDetail = "";
+
+    /// <summary>状态栏是否处于"需要用户处理"档（红字）：请求失败与需重新登录</summary>
+    [ObservableProperty]
+    private bool _statusIsError;
+
     public bool HasStatusText => !string.IsNullOrEmpty(StatusText);
+
+    public bool HasStatusDetail => !string.IsNullOrEmpty(StatusDetail);
+
+    /// <summary>有提示即可复制（含领取结果）；无提示时复制入口不出现</summary>
+    public bool CanCopyStatus => HasStatusText;
+
+    /// <summary>状态栏悬浮提示：完整文案 +（有则）技术细节与日志文件路径；无提示时为空，不弹空气泡。</summary>
+    public string? StatusTooltip
+    {
+        get
+        {
+            if (!HasStatusText) return null;
+            var lines = new List<string> { StatusText };
+            if (HasStatusDetail)
+            {
+                lines.Add($"详情：{StatusDetail}");
+                lines.Add($"日志：{DiagLog.CurrentFilePath}");
+            }
+            return string.Join(Environment.NewLine, lines);
+        }
+    }
 
     /// <summary>状态栏显示时下方按钮的避让位移（DIP）：状态栏不占布局空间，按钮让位并带过渡动画。</summary>
     public double StatusOffset => HasStatusText ? 16 : 0;
@@ -222,14 +288,16 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         try
         {
+            DiagLog.Info(_scheduledLaunch ? "定时拉起：开始恢复登录态" : "启动：开始恢复登录态");
             if (!_cred.HasToken && !_cred.HasRefreshToken)
             {
-                StatusText = "";
+                ClearStatus();
                 if (_scheduledLaunch)
                 {
                     // 定时拉起但无可用登录态：留在登录引导，不自动退出，发失败通知
-                    StatusText = "定时领取：尚未登录";
+                    SetStatus("定时领取：尚未登录", isError: true);
                     _scheduledOutcome ??= "尚未登录，需要先完成短信登录";
+                    DiagLog.Warn("定时领取：本地无可用登录态");
                     _ = NotifyScheduledOutcomeAsync();
                     OpenLogin();
                 }
@@ -238,12 +306,13 @@ public partial class MainWindowViewModel : ViewModelBase
             // JWT 仍在有效期且未到 refresh_token 保活间隔：直接复用本地登录态，不打刷新请求
             if (_session.JwtNeedsRefresh)
             {
-                StatusText = "正在恢复登录态…";
+                SetStatus("正在恢复登录态…");
                 var r = await _session.EnsureJwtAsync();
                 if (!r.Ok)
                 {
                     IsLoggedIn = false;
-                    StatusText = r.Error;
+                    SetStatus(r.Error, isError: true);
+                    DiagLog.Warn($"恢复登录态失败：{r.Error}");
                     if (!r.NeedRelogin) _scheduledOutcome ??= r.Error;
                     // 登录已过期（invalid_grant）：打开登录引导，预填手机号
                     if (r.NeedRelogin) HandleRelogin();
@@ -256,8 +325,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            StatusText = $"初始化失败：{ex.Message}";
-            _scheduledOutcome ??= $"初始化失败：{ex.Message}";
+            Fail($"初始化失败：{ex.Message}", GlaccSession.Describe(ex));
             if (_scheduledLaunch) _ = NotifyScheduledOutcomeAsync();
         }
     }
@@ -268,33 +336,112 @@ public partial class MainWindowViewModel : ViewModelBase
         PhoneRevealed = false;
         Accounts.Clear();
         Accounts.Add(PhoneMasked);
-        await RefreshSnapshotAsync();
+        // 换账号后旧余额不再可信：先置为未知，由下面的快照刷新重新取值或给出未同步入口
+        BalanceFetched = false;
+        BalanceHint = "";
+        if (await RefreshSnapshotAsync())
+            DiagLog.Info($"登录态就绪：今日任务 {TotalClaims} 次，已完成 {ClaimIndex} 次");
     }
 
-    /// <summary>拉取任务进度 + 钱包余额并刷新 UI。</summary>
-    private async Task RefreshSnapshotAsync()
+    /// <summary>拉取任务进度 + 钱包余额并刷新 UI；返回是否取得任务进度。</summary>
+    private async Task<bool> RefreshSnapshotAsync()
     {
         var stages = await _game.GetTaskStagesAsync();
-        if (!TryHandle(stages, "网络异常，无法同步任务进度")) return;
+        if (!TryHandle(stages, "无法同步任务进度")) return false;
         ApplyStages(stages.Value!);
-        StatusText = "";
+        ClearStatus();
 
         var score = await _game.GetWalletScoreAsync();
-        if (TryHandleRelogin(score.Reason)) return;
-        if (score.Ok) BalanceMinutes = ScoreToMinutes(score.Value);
+        if (!ApplyWallet(score)) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// 应用一次钱包查询结果：成功则刷新余额并清除"未同步"标记，失败则记录原因
+    /// （供余额卡内提示与日志）。返回 false 表示登录态已失效，调用方应中断。
+    /// </summary>
+    private bool ApplyWallet(GlaccCallResult<long> score)
+    {
+        if (TryHandleRelogin(score.Reason)) return false;
+        if (score.Ok)
+        {
+            BalanceMinutes = ScoreToMinutes(score.Value);
+            BalanceFetched = true;
+            BalanceHint = "";
+            return true;
+        }
+        BalanceHint = $"{DescribeFailure(score.Reason)}（{score.Detail}）";
+        DiagLog.Warn($"查询余额失败：{score.Reason}｜{score.Detail}");
+        return true;
+    }
+
+    /// <summary>余额摘要：未取到时明确写"未知"，不输出可能是默认值的 0。</summary>
+    private string BalanceSummary => BalanceFetched
+        ? $"{BalanceHours} 小时 {((int)Math.Round(BalanceMinutes)) % 60:00} 分"
+        : "未知";
+
+    /// <summary>余额未同步时手动重试一次钱包查询（只读请求，无副作用）。</summary>
+    [RelayCommand]
+    private async Task RetryBalanceAsync()
+    {
+        if (!HasBalanceHint || BalanceBusy) return;
+        BalanceBusy = true;
+        try
+        {
+            var score = await _game.GetWalletScoreAsync();
+            if (!ApplyWallet(score)) return;
+            if (score.Ok) DiagLog.Info($"余额已刷新：{BalanceSummary}");
+        }
+        finally
+        {
+            BalanceBusy = false;
+        }
+    }
+
+    /// <summary>清空状态栏（成功与进行中路径）。</summary>
+    private void ClearStatus() => SetStatus("");
+
+    /// <summary>写状态栏：文案 + 技术细节 + 严重度（isError = 需要用户处理，界面按错误色呈现）。</summary>
+    private void SetStatus(string text, string detail = "", bool isError = false)
+    {
+        StatusText = text;
+        StatusDetail = detail;
+        StatusIsError = isError;
+    }
+
+    /// <summary>失败原因 → 用户可读文案；技术细节另行给出（悬浮提示与"复制错误信息"）。</summary>
+    private static string DescribeFailure(GlaccFailReason reason) => reason switch
+    {
+        GlaccFailReason.NoResponse => "网络请求失败：无法连接服务器",
+        GlaccFailReason.ServerError => "服务端暂时不可用（HTTP 5xx）",
+        GlaccFailReason.BadResponse => "服务端响应无法解析：接口可能已变更",
+        GlaccFailReason.ClientError => "本机网络组件异常：TLS 指纹库不可用",
+        GlaccFailReason.NeedRelogin => "登录已过期，请重新短信登录",
+        GlaccFailReason.NotLoggedIn => "尚未登录，请先完成短信登录",
+        _ => "网络异常",
+    };
+
+    /// <summary>置失败终态：状态栏文案 + 技术细节，中断领取并记录日志与定时通知原因。</summary>
+    /// <param name="message">面向用户的终态提示</param>
+    /// <param name="detail">技术细节（异常类型与信息），写入日志并供复制</param>
+    private void Fail(string message, string detail = "")
+    {
+        SetStatus(message, detail, isError: true);
+        State = RunState.Idle;
+        _scheduledOutcome ??= message;
+        DiagLog.Warn($"领取终态：{message}｜{detail}");
     }
 
     /// <summary>
     /// 统一处理请求结果：成功继续；登录态不可用则中断并引导重新登录；
-    /// 网络失败给出终态提示并回到空闲态（避免残留"正在…"类临时文案）。
+    /// 请求失败按原因给出终态提示并回到空闲态（避免残留"正在…"类临时文案）。
     /// </summary>
-    private bool TryHandle<T>(GlaccCallResult<T> result, string networkError)
+    /// <param name="context">补充说明（如"无法同步任务进度""已中断"）</param>
+    private bool TryHandle<T>(GlaccCallResult<T> result, string context)
     {
         if (result.Ok) return true;
         if (TryHandleRelogin(result.Reason)) return false;
-        StatusText = networkError;
-        State = RunState.Idle;
-        _scheduledOutcome ??= networkError;
+        Fail($"{DescribeFailure(result.Reason)}，{context}", result.Detail);
         return false;
     }
 
@@ -311,8 +458,9 @@ public partial class MainWindowViewModel : ViewModelBase
     private void HandleRelogin(bool expired = true)
     {
         State = RunState.Idle;
-        StatusText = expired ? "登录已过期，请重新短信登录" : "尚未登录，请先完成短信登录";
+        SetStatus(expired ? "登录已过期，请重新短信登录" : "尚未登录，请先完成短信登录", isError: true);
         _scheduledOutcome ??= expired ? "登录已过期，需要重新短信登录" : "尚未登录，需要先完成短信登录";
+        DiagLog.Warn(expired ? "登录已过期，需重新短信登录" : "本地无登录凭证，需先完成短信登录");
         IsSettingsOpen = false;
         OpenLogin();
     }
@@ -347,24 +495,26 @@ public partial class MainWindowViewModel : ViewModelBase
         if (State != RunState.Idle) return;
         if (TotalClaims == 0)
         {
-            StatusText = "正在同步任务…";
+            SetStatus("正在同步任务…");
             await RefreshSnapshotAsync();
             if (TotalClaims == 0)
             {
                 _scheduledOutcome ??= "服务端今日暂无任务数据";
+                DiagLog.Warn("服务端今日未返回主任务数据，放弃本次领取");
                 return;
             }
         }
         State = RunState.Running;
-        StatusText = "";
+        ClearStatus();
+        DiagLog.Info($"开始领取：共 {TotalClaims} 次，已完成 {ClaimIndex} 次");
         try
         {
             await RunClaimLoopAsync();
         }
         catch (Exception ex)
         {
-            StatusText = $"领取中断：{ex.Message}";
-            _scheduledOutcome ??= $"领取中断：{ex.Message}";
+            DiagLog.Error("领取中断", ex);
+            Fail($"领取中断：{ex.Message}", GlaccSession.Describe(ex));
             State = ClaimIndex >= TotalClaims && TotalClaims > 0 ? RunState.Done : RunState.Idle;
         }
     }
@@ -375,14 +525,13 @@ public partial class MainWindowViewModel : ViewModelBase
         // 对账总次数 = 剩余阶段数 + 开头 1 次：开头这次定阶段一领几次，之后每次阶段结束对账
         // 顺带定出下一阶段领几次；末阶段的结束对账即收尾，不再重复查询。
         var fresh = await _game.GetTaskStagesAsync();
-        if (!TryHandle(fresh, "网络异常，已中断")) return;
+        if (!TryHandle(fresh, "已中断")) return;
         ApplyStages(fresh.Value!);
         if (ClaimIndex >= TotalClaims)
         {
             // 开头对账即今日已全部完成：无末阶段收尾，这里补查一次钱包刷新余额
-            var wallet = await _game.GetWalletScoreAsync();
-            if (TryHandleRelogin(wallet.Reason)) return;
-            if (wallet.Ok) BalanceMinutes = ScoreToMinutes(wallet.Value);
+            DiagLog.Info("对账显示今日任务已完成，无需领取");
+            if (!ApplyWallet(await _game.GetWalletScoreAsync())) return;
             CompleteScheduledRun();
             return;
         }
@@ -401,10 +550,10 @@ public partial class MainWindowViewModel : ViewModelBase
                 var push = await _game.PushTaskAsync(stage.TaskId,
                     onRetry: (_, wait) =>
                     {
-                        StatusText = $"网络波动：{stage.Name} 推送失败，{wait.TotalSeconds:0} 秒后重试";
+                        SetStatus($"网络波动：{stage.Name} 推送失败，{wait.TotalSeconds:0} 秒后重试");
                         return Task.CompletedTask;
                     });
-                if (!TryHandle(push, "网络异常，已中断")) return;
+                if (!TryHandle(push, "已中断")) return;
                 if (State != RunState.Running) break;
 
                 var result = push.Value!;
@@ -413,14 +562,17 @@ public partial class MainWindowViewModel : ViewModelBase
                     _stages[si] = stage with { StageCurrent = stage.StageCurrent + 1 };
                     ClaimIndex = _stages.Sum(s => s.StageCurrent);
                     var addMinutes = ScoreToMinutes(result.AddScore);
-                    StatusText = addMinutes > 0
+                    SetStatus(addMinutes > 0
                         ? $"已领取 {stage.Name}（+{addMinutes:0.#} 分钟）"
-                        : $"已领取 {stage.Name}";
+                        : $"已领取 {stage.Name}");
+                    DiagLog.Info($"已领取 {stage.Name}，+{addMinutes:0.#} 分钟（taskId={stage.TaskId}）");
                 }
                 else
                 {
                     // -1702 = 阶段已满；其他 code = 服务端限制，跳下一阶段
-                    StatusText = $"服务端返回 code={result.Code}（{stage.Name} 暂不可推），跳下一阶段";
+                    SetStatus($"服务端返回 code={result.Code}（{stage.Name} 暂不可推），跳下一阶段",
+                        $"mobileGLTaskPush code={result.Code}，taskId={stage.TaskId}");
+                    DiagLog.Warn($"推送被服务端拒绝：code={result.Code}，taskId={stage.TaskId}");
                     break;
                 }
             }
@@ -433,14 +585,16 @@ public partial class MainWindowViewModel : ViewModelBase
             await Task.Delay(TimeSpan.FromSeconds(3));
             // 运行期空列表视为查询失败：对账中服务端不应清空进度
             var server = await _game.GetTaskStagesAsync(accept: s => s is { Count: > 0 });
-            if (!TryHandle(server, "网络异常，已中断")) return;
+            if (!TryHandle(server, "已中断")) return;
             var serverStages = server.Value!;
             var serverCount = serverStages.Sum(s => s.StageCurrent);
             if (ClaimIndex > serverCount)
             {
                 ApplyStages(serverStages);
-                StatusText = $"进度对账异常（本地 {ClaimIndex} 次 / 服务端 {serverCount} 次），已停止领取";
+                SetStatus($"进度对账异常（本地 {ClaimIndex} 次 / 服务端 {serverCount} 次），已停止领取",
+                    "服务端进度少于本地已确认的领取次数，发放链路可能已失效", isError: true);
                 _scheduledOutcome ??= $"进度对账异常（本地 {ClaimIndex} 次 / 服务端 {serverCount} 次）";
+                DiagLog.Error($"进度对账异常：本地 {ClaimIndex} 次 / 服务端 {serverCount} 次，已停止领取");
                 State = RunState.Idle;
                 return;
             }
@@ -450,12 +604,10 @@ public partial class MainWindowViewModel : ViewModelBase
         if (State == RunState.Running)
         {
             // 收尾：末阶段的结束对账已同步服务端进度，这里只刷新钱包余额
-            var wallet = await _game.GetWalletScoreAsync();
-            if (TryHandleRelogin(wallet.Reason)) return;
-            if (wallet.Ok) BalanceMinutes = ScoreToMinutes(wallet.Value);
+            if (!ApplyWallet(await _game.GetWalletScoreAsync())) return;
             CompleteScheduledRun();
             // 完成态提示由任务卡副标题（StageText）唯一表达，状态栏直接清空避免重复
-            StatusText = "";
+            ClearStatus();
         }
     }
 
@@ -477,6 +629,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         State = RunState.Done;
         _scheduledOutcome = null; // 成功无需原因
+        DiagLog.Info($"领取完成：{ClaimIndex} / {TotalClaims} 次，余额 {BalanceSummary}");
     }
 
     /// <summary>
@@ -502,18 +655,23 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    /// <summary>发送本次定时运行结果通知；未配置 Server酱或发送失败均静默忽略。</summary>
+    /// <summary>发送本次定时运行结果通知；未配置 Server酱或发送失败均不影响主流程（失败落日志）。</summary>
     private async Task NotifyScheduledOutcomeAsync()
     {
         var key = _settings.ServerKey;
-        if (!ServerChanClient.IsConfigured(key)) return;
+        if (!ServerChanClient.IsConfigured(key))
+        {
+            DiagLog.Info("未配置 Server酱通知，跳过结果推送");
+            return;
+        }
         var success = State == RunState.Done;
         var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         var desp = success
-            ? $"**定时领取完成**\n\n- 时间: {now}\n- 当前余额: {BalanceHours} 小时 {((int)Math.Round(BalanceMinutes)) % 60:00} 分钟"
+            ? $"**定时领取完成**\n\n- 时间: {now}\n- 本次进度: {ClaimIndex} / {TotalClaims} 次\n- 当前余额: {BalanceSummary}"
             : $"**定时领取未完成**\n\n- 时间: {now}\n- 原因: {_scheduledOutcome ?? "未知原因"}";
-        await ServerChanClient.SendAsync(key.Trim(),
+        var sent = await ServerChanClient.SendAsync(key.Trim(),
             success ? "glacc-auto 定时领取成功" : "glacc-auto 定时领取失败", desp);
+        DiagLog.Info(sent ? "定时领取结果通知已发送" : "定时领取结果通知未送达");
     }
 
     /// <summary>监听"到点领取"信号：计划任务拉起了第二个实例，而本实例已在运行时，由本实例代为执行。</summary>
@@ -532,13 +690,22 @@ public partial class MainWindowViewModel : ViewModelBase
             catch
             {
                 // 信号监听不可用仅损失"运行中代跑"能力，不影响手动领取主流程
+                DiagLog.Warn("到点领取信号监听不可用，运行中实例无法代跑定时领取");
             }
         });
     }
 
     private void OnClaimSignal()
     {
-        if (IsLoggedIn && State == RunState.Idle) _ = RunScheduledClaimAsync();
+        if (IsLoggedIn && State == RunState.Idle)
+        {
+            DiagLog.Info("收到到点领取信号，由本实例代跑");
+            _ = RunScheduledClaimAsync();
+        }
+        else
+        {
+            DiagLog.Warn($"收到到点领取信号但未执行（已登录={IsLoggedIn}，当前状态={State}）");
+        }
     }
 
     /// <summary>
@@ -554,11 +721,15 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 var time = ParseScheduledTime(_settings.ScheduledTime);
                 if (!ScheduledTaskManager.MatchesExpectation(ScheduledTaskManager.Query(), time))
+                {
+                    DiagLog.Warn("计划任务状态与设置不符，重新注册");
                     ScheduledTaskManager.Register(time);
+                }
             }
-            catch
+            catch (Exception ex)
             {
-                // 校准失败静默：不影响应用启动与手动领取
+                // 校准失败不影响应用启动与手动领取
+                DiagLog.Error("计划任务自校准失败", ex);
             }
         });
     }
@@ -576,6 +747,41 @@ public partial class MainWindowViewModel : ViewModelBase
     /// <summary>ID 脱敏：ID 更短，保留后 2 位（6 位 → ****56）。</summary>
     private static string MaskId(string id) =>
         id.Length <= 2 ? id : new string('*', id.Length - 2) + id[^2..];
+
+    // ── 状态栏诊断 ──
+
+    /// <summary>复制状态栏信息（版本、时间、提示、技术细节、日志路径），便于粘贴到 issue。</summary>
+    [RelayCommand]
+    private async Task CopyStatusAsync()
+    {
+        if (!HasStatusText) return;
+        CopyRequested?.Invoke(BuildDiagnosticReport());
+        DiagLog.Info("已复制状态栏信息");
+        var restoreText = StatusText;
+        var restoreDetail = StatusDetail;
+        var restoreError = StatusIsError;
+        // 沿用当前档位色：复制确认不改变严重度，避免颜色来回闪动
+        SetStatus("已复制到剪贴板", isError: restoreError);
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        // 期间若状态被新的领取结果刷新，则不回滚
+        if (StatusText == "已复制到剪贴板")
+        {
+            SetStatus(restoreText, restoreDetail, restoreError);
+        }
+    }
+
+    private string BuildDiagnosticReport()
+    {
+        var lines = new List<string>
+        {
+            AppInfo.VersionText,
+            $"时间：{DateTime.Now:yyyy-MM-dd HH:mm:ss}",
+            $"提示：{StatusText}",
+        };
+        if (HasStatusDetail) lines.Add($"详情：{StatusDetail}");
+        lines.Add($"日志：{DiagLog.CurrentFilePath}");
+        return string.Join(Environment.NewLine, lines);
+    }
 
     // ── 登录引导（真实流程：手机号 + 短信验证码）──
 
@@ -655,11 +861,13 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagLog.Error("发送验证码异常", ex);
             r = GlaccResult.Fail($"发送验证码失败：{ex.Message}");
         }
         IsLoginBusy = false;
         if (!r.Ok)
         {
+            DiagLog.Warn($"发送验证码失败：{r.Error}");
             LoginError = r.Error;
             return;
         }
@@ -688,11 +896,13 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagLog.Error("登录异常", ex);
             r = GlaccResult.Fail($"登录失败：{ex.Message}");
         }
         IsLoginBusy = false;
         if (!r.Ok)
         {
+            DiagLog.Warn($"登录失败：{r.Error}");
             LoginError = r.Error;
             return;
         }

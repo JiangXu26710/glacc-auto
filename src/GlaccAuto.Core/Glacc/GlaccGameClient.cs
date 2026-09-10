@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using GlaccAuto.Core.Diagnostics;
 
 namespace GlaccAuto.Core.Glacc;
 
@@ -29,7 +30,7 @@ public sealed class GlaccGameClient
         if (!_cred.HasToken) return Task.FromResult(NotLoggedIn<List<GlaccTaskStage>>());
         var url = $"{GlaccConstants.GameBase}/xlppc.gacs/api/gxsdn/act/advert/mobileGLTaskList?appid={GlaccConstants.AppId}";
         return _session.RunAsync(c => SendAsync(HttpMethod.Get, url, null, c), ParseStages,
-            accept, onRetry, ct);
+            accept, onRetry, "拉取任务进度", ct);
     }
 
     /// <summary>钱包分值（score，与"可用时长"按 80:1 分钟换算）。</summary>
@@ -40,7 +41,7 @@ public sealed class GlaccGameClient
         if (!_cred.HasToken) return Task.FromResult(NotLoggedIn<long>());
         var url = $"{GlaccConstants.GameBase}/xlppc.gacs/api/gxsdn/gold/get_user_wallet";
         return _session.RunAsync(c => SendAsync(HttpMethod.Get, url, null, c), ParseWallet,
-            null, onRetry, ct);
+            null, onRetry, "查询余额", ct);
     }
 
     /// <summary>真签名直推一次 mobileGLTaskPush。code=0 发放成功；-1702 = 阶段已满；10007 = 签名校验失败。</summary>
@@ -59,7 +60,7 @@ public sealed class GlaccGameClient
                 return SendAsync(HttpMethod.Post, url,
                     JsonSerializer.Serialize(body, GlaccJsonContext.Default.GlaccPushBody), c);
             },
-            ParsePush, null, onRetry, ct);
+            ParsePush, null, onRetry, $"推送任务 {taskId}", ct);
     }
 
     // ── 响应解析（抛异常即视为请求失败，由执行器计入重试预算）──
@@ -121,7 +122,7 @@ public sealed class GlaccGameClient
 
     // ── HTTP 基础设施（game-xacc 通用头，抓包 §四；走 GlaccTls：OkHttp/Android TLS 指纹）──
 
-    private async Task<GlaccTlsResponse?> SendAsync(HttpMethod method, string url, string? json,
+    private async Task<GlaccHttpResponse> SendAsync(HttpMethod method, string url, string? json,
         CancellationToken ct)
     {
         try
@@ -146,15 +147,27 @@ public sealed class GlaccGameClient
                 ["user-agent"] = GlaccUa.Game(device),
             };
             if (json is not null) headers["content-type"] = "application/json";
-            return await Task.Run(() => GlaccTls.Send(
-                new TlsRequestPayload(
-                    GlaccDevicePool.IdentifierFor(device), method.Method, url, json,
-                    headers, [.. headers.Keys], 15, true, true, false, false, true),
-                out _), ct);
+            var payload = new TlsRequestPayload(
+                GlaccDevicePool.IdentifierFor(device), method.Method, url, json,
+                headers, [.. headers.Keys], 15, true, true, false, false, true);
+            // 原生库的失败原因必须带出来：这是区分"网络不可达"与"本机库异常"的唯一线索
+            string error = "";
+            var resp = await Task.Run(() =>
+            {
+                var result = GlaccTls.Send(payload, out var e);
+                error = e;
+                return result;
+            }, ct);
+            return new GlaccHttpResponse(resp, error);
         }
-        catch (Exception)
+        catch (GlaccTlsUnavailableException ex)
         {
-            return null;
+            DiagLog.Error("TLS 指纹库不可用", ex);
+            return GlaccHttpResponse.FromClientFault(GlaccSession.Describe(ex));
+        }
+        catch (Exception ex)
+        {
+            return new GlaccHttpResponse(null, GlaccSession.Describe(ex));
         }
     }
 }

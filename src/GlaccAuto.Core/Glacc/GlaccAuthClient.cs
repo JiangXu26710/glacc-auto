@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
+using GlaccAuto.Core.Diagnostics;
 
 namespace GlaccAuto.Core.Glacc;
 
@@ -24,19 +25,32 @@ public sealed class GlaccAuthClient
         if (phone is null) return GlaccResult.Fail("手机号格式不正确（应为 11 位大陆手机号）");
 
         var captcha = await CaptchaInitAsync("POST:/v1/auth/verification", phone, ct);
-        if (captcha is null) return GlaccResult.Fail("获取人机凭证失败，请稍后重试");
+        if (captcha is null)
+        {
+            DiagLog.Warn("发送验证码失败：未取得人机凭证");
+            return GlaccResult.Fail("获取人机凭证失败，请稍后重试");
+        }
 
         var resp = await PostJsonAsync($"{GlaccConstants.AuthBase}/v1/auth/verification",
             new VerificationRequest(captcha, GlaccConstants.ClientId, phone, "ANY", "SIGN_IN"),
             GlaccJsonContext.Default.VerificationRequest, ct);
-        if (resp.Body is null) return GlaccResult.Fail("网络错误，发送验证码失败");
+        if (resp.Body is null)
+        {
+            DiagLog.Warn($"发送验证码失败（网络层）：{resp.Error}");
+            return GlaccResult.Fail("网络错误，发送验证码失败");
+        }
         using var doc = TryParse(resp.Body);
-        if (doc is null) return GlaccResult.Fail("发送验证码失败：服务端响应异常");
+        if (doc is null)
+        {
+            DiagLog.Warn($"发送验证码失败：响应非 JSON（HTTP {resp.Status}）");
+            return GlaccResult.Fail("发送验证码失败：服务端响应异常");
+        }
 
         var root = doc.RootElement;
         if (!root.TryGetProperty("verification_id", out var vid))
         {
             var msg = DescribeError(root);
+            DiagLog.Warn($"发送验证码失败：{msg}");
             return GlaccResult.Fail($"发送验证码失败：{msg}");
         }
         _cred.Phone = phone;
@@ -59,31 +73,59 @@ public sealed class GlaccAuthClient
         var vResp = await PostJsonAsync($"{GlaccConstants.AuthBase}/v1/auth/verification/verify",
             new VerifyCodeRequest(GlaccConstants.ClientId, vid, code),
             GlaccJsonContext.Default.VerifyCodeRequest, ct);
-        if (vResp.Body is null) return GlaccResult.Fail("网络错误，验证码校验失败");
+        if (vResp.Body is null)
+        {
+            DiagLog.Warn($"验证码校验失败（网络层）：{vResp.Error}");
+            return GlaccResult.Fail("网络错误，验证码校验失败");
+        }
         string verificationToken;
         using (var doc = TryParse(vResp.Body))
         {
-            if (doc is null) return GlaccResult.Fail("验证码校验失败：服务端响应异常");
+            if (doc is null)
+            {
+                DiagLog.Warn($"验证码校验失败：响应非 JSON（HTTP {vResp.Status}）");
+                return GlaccResult.Fail("验证码校验失败：服务端响应异常");
+            }
             if (!doc.RootElement.TryGetProperty("verification_token", out var vt))
-                return GlaccResult.Fail($"验证码校验失败：{DescribeError(doc.RootElement)}");
+            {
+                var msg = DescribeError(doc.RootElement);
+                DiagLog.Warn($"验证码校验失败：{msg}");
+                return GlaccResult.Fail($"验证码校验失败：{msg}");
+            }
             verificationToken = vt.GetString() ?? "";
         }
 
         // 2) signin（signin action 需要自己的 captcha_token）
         var captcha = await CaptchaInitAsync("POST:/v1/auth/signin", _cred.Phone, ct);
-        if (captcha is null) return GlaccResult.Fail("获取人机凭证失败，请稍后重试");
+        if (captcha is null)
+        {
+            DiagLog.Warn("登录失败：未取得人机凭证");
+            return GlaccResult.Fail("获取人机凭证失败，请稍后重试");
+        }
 
         var sResp = await PostJsonAsync($"{GlaccConstants.AuthBase}/v1/auth/signin",
             new SigninRequest(captcha, GlaccConstants.ClientId, GlaccConstants.ClientSecret,
                 _cred.Phone, verificationToken),
             GlaccJsonContext.Default.SigninRequest, ct);
-        if (sResp.Body is null) return GlaccResult.Fail("网络错误，登录失败");
+        if (sResp.Body is null)
+        {
+            DiagLog.Warn($"登录失败（网络层）：{sResp.Error}");
+            return GlaccResult.Fail("网络错误，登录失败");
+        }
         using var sDoc = TryParse(sResp.Body);
-        if (sDoc is null) return GlaccResult.Fail("登录失败：服务端响应异常");
+        if (sDoc is null)
+        {
+            DiagLog.Warn($"登录失败：响应非 JSON（HTTP {sResp.Status}）");
+            return GlaccResult.Fail("登录失败：服务端响应异常");
+        }
 
         var sRoot = sDoc.RootElement;
         if (!sRoot.TryGetProperty("access_token", out var at))
-            return GlaccResult.Fail($"登录失败：{DescribeError(sRoot)}");
+        {
+            var msg = DescribeError(sRoot);
+            DiagLog.Warn($"登录失败：{msg}");
+            return GlaccResult.Fail($"登录失败：{msg}");
+        }
 
         _cred.AccessToken = at.GetString() ?? "";
         if (sRoot.TryGetProperty("refresh_token", out var rt))
@@ -108,17 +150,27 @@ public sealed class GlaccAuthClient
     public async Task<GlaccResult> RefreshAsync(CancellationToken ct = default)
     {
         var rt = _cred.RefreshToken;
-        if (string.IsNullOrEmpty(rt)) return GlaccResult.Fail("无 refresh_token，请重新登录");
+        if (string.IsNullOrEmpty(rt))
+        {
+            DiagLog.Warn("刷新登录态失败：本地无 refresh_token");
+            return GlaccResult.Fail("无 refresh_token，请重新登录");
+        }
 
         var resp = await PostJsonAsync($"{GlaccConstants.AuthBase}/v1/auth/token",
             new TokenRefreshRequest("refresh_token", rt, GlaccConstants.ClientId,
                 GlaccConstants.ClientSecret),
             GlaccJsonContext.Default.TokenRefreshRequest, ct);
         if (resp.Transient)
+        {
+            DiagLog.Warn($"刷新登录态失败（网络层）：{resp.Error}");
             return GlaccResult.Fail("网络错误，刷新登录态失败", retryable: true);
+        }
         using var doc = TryParse(resp.Body);
         if (doc is null)
+        {
+            DiagLog.Warn($"刷新登录态失败：响应非 JSON（HTTP {resp.Status}）");
             return GlaccResult.Fail("刷新登录态失败：服务端响应异常", retryable: true);
+        }
 
         var root = doc.RootElement;
         if (!root.TryGetProperty("access_token", out var at))
@@ -126,6 +178,9 @@ public sealed class GlaccAuthClient
             // invalid_grant / 4126 = refresh_token 已失效，需重新短信登录
             var invalid = root.TryGetProperty("error", out var err) &&
                           err.GetString()?.Contains("invalid_grant") == true;
+            DiagLog.Warn(invalid
+                ? "refresh_token 已失效，需重新短信登录"
+                : $"刷新登录态失败：{DescribeError(root)}");
             return GlaccResult.Fail(
                 invalid ? "登录已过期，请重新短信登录" : $"刷新登录态失败：{DescribeError(root)}",
                 needRelogin: invalid);
@@ -175,14 +230,31 @@ public sealed class GlaccAuthClient
             var tls = new TlsRequestPayload(
                 GlaccDevicePool.IdentifierFor(device), "POST", url, body,
                 headers, [.. headers.Keys], 15, true, true, false, false, true);
-            var resp = await Task.Run(() => GlaccTls.Send(tls, out _), ct);
-            return new AuthHttpResponse(resp?.Body, resp?.Status ?? 0);
+            // 原生库的失败原因带出来落日志：认证链路信息量最大的排障线索
+            string error = "";
+            var resp = await Task.Run(() =>
+            {
+                var result = GlaccTls.Send(tls, out var e);
+                error = e;
+                return result;
+            }, ct);
+            if (resp is null) DiagLog.Warn($"认证接口无响应（{Endpoint(url)}）：{error}");
+            return new AuthHttpResponse(resp?.Body, resp?.Status ?? 0, error);
         }
-        catch (Exception)
+        catch (GlaccTlsUnavailableException ex)
         {
-            return new AuthHttpResponse(null, 0);
+            DiagLog.Error("TLS 指纹库不可用", ex);
+            return new AuthHttpResponse(null, 0, GlaccSession.Describe(ex));
+        }
+        catch (Exception ex)
+        {
+            return new AuthHttpResponse(null, 0, GlaccSession.Describe(ex));
         }
     }
+
+    /// <summary>日志用端点名：只保留路径，不带查询参数。</summary>
+    private static string Endpoint(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.AbsolutePath : url;
 
     /// <summary>解析响应体；非 JSON（如网关错误页）返回 null，避免异常外泄到业务层。</summary>
     private static JsonDocument? TryParse(string? body)
@@ -199,7 +271,7 @@ public sealed class GlaccAuthClient
     }
 
     /// <summary>一次 POST 的原始结果：<see cref="Body"/> 为 null 表示未取得响应（网络层失败）。</summary>
-    private readonly record struct AuthHttpResponse(string? Body, int Status)
+    private readonly record struct AuthHttpResponse(string? Body, int Status, string Error = "")
     {
         /// <summary>未取得响应或服务端 5xx：网络层失败，未产生业务判定。</summary>
         public bool Transient => Body is null || Status >= 500;

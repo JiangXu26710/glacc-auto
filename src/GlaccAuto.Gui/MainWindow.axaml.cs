@@ -28,6 +28,7 @@ public partial class MainWindow : Window
         _vm = new MainWindowViewModel(settings, scheduledLaunch);
         DataContext = _vm;
         _vm.CloseRequested += Close;
+        _vm.CopyRequested += text => _ = CopyToClipboardAsync(text);
         _vm.Settings.ScaleChangeRequested += OnScaleChangeRequested;
 
         // Win11 启用 Mica 材质背景；Win10 回退为主题实色背景（XAML 中的 DynamicResource）
@@ -143,6 +144,19 @@ public partial class MainWindow : Window
     private void OnScrimPressed(object? sender, PointerPressedEventArgs e)
     {
         _vm.CancelExitCommand.Execute(null);
+    }
+
+    /// <summary>把诊断信息写入系统剪贴板；剪贴板被占用等失败情形静默忽略（界面已给反馈）。</summary>
+    private async Task CopyToClipboardAsync(string text)
+    {
+        try
+        {
+            if (Clipboard is { } clipboard) await clipboard.SetTextAsync(text);
+        }
+        catch
+        {
+            // 忽略：不影响领取流程
+        }
     }
 
     /// <summary>

@@ -7,7 +7,7 @@ namespace GlaccAuto.Core;
 /// <summary>应用设置，持久化于 %APPDATA%\glacc-auto\settings.json</summary>
 public sealed class AppSettings
 {
-    public bool ScheduledEnabled { get; set; }
+    /// <summary>定时领取时刻（hh:mm）：计划任务不存在时作为回退值；任务存在时以任务的真实触发时间为准</summary>
     public string ScheduledTime { get; set; } = "08:00";
     public string ServerKey { get; set; } = "";
     public int IntervalMinSec { get; set; } = 30;

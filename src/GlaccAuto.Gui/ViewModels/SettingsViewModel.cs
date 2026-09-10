@@ -13,7 +13,6 @@ public partial class SettingsViewModel : ViewModelBase
     public SettingsViewModel(AppSettings settings)
     {
         _settings = settings;
-        _scheduledEnabled = settings.ScheduledEnabled;
         _serverKey = settings.ServerKey;
 
         // 启动时校验持久化值（ctor 直接给字段赋值不经过 setter，需在此显式纠正）
@@ -68,8 +67,11 @@ public partial class SettingsViewModel : ViewModelBase
 
     public bool HasScheduleError => !string.IsNullOrEmpty(ScheduleError);
 
-    /// <summary>注册失败回滚开关时静默，避免再次触发变更处理</summary>
+    /// <summary>注册/注销失败回滚开关、启动投影时静默，避免再次触发变更处理</summary>
     private bool _suppressScheduleEvents;
+
+    /// <summary>用户在本会话是否已手动改过计划任务设置；改过之后启动投影不再覆盖其改动</summary>
+    private bool _scheduleTouched;
 
     // 缩放事件保护：还原时静默设置，避免再次触发变更事件
     private bool _suppressScaleEvents;
@@ -132,11 +134,32 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private int _themeIndex;
 
+    /// <summary>
+    /// 把计划任务的真实状态投影到界面：开关与时间均取自任务本身（任务不存在时保持本地配置的时间）。
+    /// 用户已手动改过计划任务设置时不覆盖，避免启动投影盖掉用户刚做的改动。
+    /// </summary>
+    /// <param name="skipIfUserTouched">true = 用户本会话已改过则跳过（供启动投影使用）。</param>
+    public void ApplyScheduleProjection(ScheduledTaskManager.TaskSnapshot? snapshot, bool skipIfUserTouched = false)
+    {
+        if (skipIfUserTouched && _scheduleTouched) return;
+        _suppressScheduleEvents = true;
+        try
+        {
+            ScheduledEnabled = snapshot is { Enabled: true, TriggerEnabled: true };
+            // 只取到分钟：任务触发时间含秒时不进入界面，与注册写回的精度保持一致
+            if (snapshot is not null)
+                ScheduledTime = new TimeSpan(snapshot.StartTime.Hours, snapshot.StartTime.Minutes, 0);
+        }
+        finally
+        {
+            _suppressScheduleEvents = false;
+        }
+    }
+
     partial void OnScheduledEnabledChanged(bool value)
     {
         if (_suppressScheduleEvents) return;
-        _settings.ScheduledEnabled = value;
-        _settings.Save();
+        _scheduleTouched = true;
         ScheduleError = "";
         if (value)
         {
@@ -146,14 +169,10 @@ public partial class SettingsViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
-                // 注册失败：回滚开关与持久化值，卡片内提示原因
+                // 注册失败：按任务真实状态回滚开关，界面始终反映系统实况
                 DiagLog.Error("定时任务注册失败", ex);
                 ScheduleError = $"定时任务注册失败：{ex.Message}";
-                _suppressScheduleEvents = true;
-                ScheduledEnabled = false;
-                _suppressScheduleEvents = false;
-                _settings.ScheduledEnabled = false;
-                _settings.Save();
+                RevertScheduledEnabled();
             }
         }
         else
@@ -164,17 +183,38 @@ public partial class SettingsViewModel : ViewModelBase
             }
             catch (Exception ex)
             {
+                // 注销失败：开关回到"任务仍在"的真实状态，避免界面显示已关而任务照常触发
                 DiagLog.Error("定时任务注销失败", ex);
                 ScheduleError = $"定时任务注销失败：{ex.Message}";
+                RevertScheduledEnabled();
             }
+        }
+    }
+
+    /// <summary>按计划任务的真实状态回滚开关（查询失败时视为未启用）。</summary>
+    private void RevertScheduledEnabled()
+    {
+        var enabled = ScheduledTaskManager.TryQuery(out var snapshot)
+            && snapshot is { Enabled: true, TriggerEnabled: true };
+        _suppressScheduleEvents = true;
+        try
+        {
+            ScheduledEnabled = enabled;
+        }
+        finally
+        {
+            _suppressScheduleEvents = false;
         }
     }
 
     partial void OnScheduledTimeChanged(TimeSpan? value)
     {
+        // 投影与回滚期间不产生副作用：任务真实时间不回写本地配置
+        if (_suppressScheduleEvents) return;
+        _scheduleTouched = true;
         _settings.ScheduledTime = value?.ToString(@"hh\:mm") ?? "08:00";
         _settings.Save();
-        if (!_settings.ScheduledEnabled) return;
+        if (!ScheduledEnabled) return;
         try
         {
             ScheduledTaskManager.Register(GetScheduledTime());
@@ -187,9 +227,11 @@ public partial class SettingsViewModel : ViewModelBase
         }
     }
 
+    /// <summary>当前界面显示的领取时刻；界面未给出时回退到本地配置值。</summary>
     private TimeSpan GetScheduledTime() =>
-        TimeSpan.TryParse(_settings.ScheduledTime, CultureInfo.InvariantCulture, out var t)
-            ? t : new TimeSpan(8, 0, 0);
+        ScheduledTime
+        ?? (TimeSpan.TryParse(_settings.ScheduledTime, CultureInfo.InvariantCulture, out var t)
+            ? t : new TimeSpan(8, 0, 0));
 
     partial void OnServerKeyChanged(string value)
     {

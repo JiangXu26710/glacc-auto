@@ -52,20 +52,25 @@ public static class ScheduledTaskManager
             && !snapshot.StopIfGoingOnBatteries;
     }
 
-    /// <summary>查询任务定义；任务不存在或查询失败返回 null。</summary>
-    public static TaskSnapshot? Query()
+    /// <summary>
+    /// 查询任务定义。返回 true = 查询成功（此时 snapshot 为 null 表示任务不存在）；
+    /// 返回 false = 查询本身失败（schtasks 异常、超时或输出无法解析），此时 snapshot 恒为 null。
+    /// </summary>
+    public static bool TryQuery(out TaskSnapshot? snapshot)
     {
+        snapshot = null;
         string stdout;
         try
         {
             var (code, output, _) = RunSchtasks($"/Query /TN \"{TaskName}\" /XML");
-            if (code != 0) return null;
+            // schtasks 对不存在的任务返回非零退出码：查询本身成功，结论是任务不存在
+            if (code != 0) return true;
             stdout = output;
         }
         catch
         {
-            // 调用超时等执行层失败视为任务不可用，由调用方走重注册路径
-            return null;
+            // 调用超时等执行层失败：无法判断任务状态
+            return false;
         }
         try
         {
@@ -74,13 +79,13 @@ public static class ScheduledTaskManager
             var trigger = root?.Element(Ns + "Triggers")?.Element(Ns + "CalendarTrigger");
             var exec = root?.Element(Ns + "Actions")?.Element(Ns + "Exec");
             var start = trigger?.Element(Ns + "StartBoundary")?.Value;
-            if (settings is null || trigger is null || exec is null || start is null) return null;
+            if (settings is null || trigger is null || exec is null || start is null) return false;
             if (!DateTime.TryParse(start, CultureInfo.InvariantCulture, DateTimeStyles.None, out var st))
-                return null;
+                return false;
             var daily = int.TryParse(
                 trigger.Element(Ns + "ScheduleByDay")?.Element(Ns + "DaysInterval")?.Value,
                 out var days) && days == 1;
-            return new TaskSnapshot(
+            snapshot = new TaskSnapshot(
                 // 导出的 XML 中 Enabled 在启用时缺省、禁用时才写 false
                 Enabled: ElementText(settings, "Enabled") != "false",
                 TriggerEnabled: ElementText(trigger, "Enabled") != "false",
@@ -92,11 +97,12 @@ public static class ScheduledTaskManager
                 // 电池两项导出缺省时按 Windows 默认 true（不允许电池启动）处理，会触发重注册纠正
                 DisallowStartIfOnBatteries: ElementText(settings, "DisallowStartIfOnBatteries") != "false",
                 StopIfGoingOnBatteries: ElementText(settings, "StopIfGoingOnBatteries") != "false");
+            return true;
         }
         catch
         {
-            // XML 解析失败视为任务不可用，由调用方走重注册路径
-            return null;
+            // 输出无法解析：无法判断任务状态
+            return false;
         }
     }
 
@@ -127,8 +133,9 @@ public static class ScheduledTaskManager
         // 无条件先删除：查询失败（瞬时故障）不应把仍在的任务误判为已注销而跳过删除
         var (code, _, stderr) = RunSchtasks($"/Delete /F /TN \"{TaskName}\"");
         if (code == 0) return;
-        // 删除失败后查询复核：任务确已不存在（含外部已删/竞态删除）视为幂等成功
-        if (Query() is null) return;
+        // 删除失败后查询复核：查询成功且确认任务不存在（含外部已删/竞态删除）才视为幂等成功；
+        // 查询本身失败时如实报错，避免把无法确认的状态当成已注销
+        if (TryQuery(out var snapshot) && snapshot is null) return;
         throw new ScheduledTaskException(Describe(stderr));
     }
 

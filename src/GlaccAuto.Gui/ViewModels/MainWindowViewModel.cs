@@ -43,7 +43,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _session = new GlaccSession(_cred, _auth, () => _settings.NetworkRetryCount);
         _game = new GlaccGameClient(_cred, _session);
         StartClaimSignalListener();
-        CalibrateScheduledTask();
+        SyncScheduledTask(skipIfUserTouched: true);
         _ = InitializeAsync();
     }
 
@@ -723,27 +723,35 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 计划任务自校准：开关开启时比对任务真实状态（XML 导出），
-    /// 与预期不符（不存在/被禁用/时间或路径与参数变更）则静默重注册一次。
+    /// 计划任务状态同步：把任务的真实状态（XML 导出）投影到设置页，开关与时间均以系统为准；
+    /// 任务处于启用态但定义与预期不符（可执行文件路径漂移、参数或电源设置被改）时按任务的真实时间重注册一次。
     /// </summary>
-    private void CalibrateScheduledTask()
+    /// <param name="skipIfUserTouched">true = 用户本会话已改过计划任务设置则不覆盖其改动。</param>
+    private void SyncScheduledTask(bool skipIfUserTouched = false)
     {
-        if (!_settings.ScheduledEnabled) return;
         _ = Task.Run(() =>
         {
             try
             {
-                var time = ParseScheduledTime(_settings.ScheduledTime);
-                if (!ScheduledTaskManager.MatchesExpectation(ScheduledTaskManager.Query(), time))
+                if (!ScheduledTaskManager.TryQuery(out var snapshot))
                 {
-                    DiagLog.Warn("计划任务状态与设置不符，重新注册");
+                    DiagLog.Warn("计划任务状态查询失败，本次状态同步跳过");
+                    return;
+                }
+                Dispatcher.UIThread.Post(() =>
+                    Settings.ApplyScheduleProjection(snapshot, skipIfUserTouched));
+                var time = snapshot?.StartTime ?? ParseScheduledTime(_settings.ScheduledTime);
+                if (snapshot is { Enabled: true, TriggerEnabled: true }
+                    && !ScheduledTaskManager.MatchesExpectation(snapshot, time))
+                {
+                    DiagLog.Warn("计划任务定义与预期不符，重新注册");
                     ScheduledTaskManager.Register(time);
                 }
             }
             catch (Exception ex)
             {
-                // 校准失败不影响应用启动与手动领取
-                DiagLog.Error("计划任务自校准失败", ex);
+                // 同步失败不影响应用启动与手动领取
+                DiagLog.Error("计划任务状态同步失败", ex);
             }
         });
     }
@@ -947,7 +955,12 @@ public partial class MainWindowViewModel : ViewModelBase
     private void OpenHome() => IsSettingsOpen = false;
 
     [RelayCommand]
-    private void OpenSettings() => IsSettingsOpen = true;
+    private void OpenSettings()
+    {
+        IsSettingsOpen = true;
+        // 进入设置页时重新读取计划任务真实状态，避免显示启动后系统被外部改动的旧状态
+        SyncScheduledTask();
+    }
 
     [RelayCommand]
     private void ConfirmExit()

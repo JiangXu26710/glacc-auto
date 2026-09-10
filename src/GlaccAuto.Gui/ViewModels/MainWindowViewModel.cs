@@ -620,9 +620,22 @@ public partial class MainWindowViewModel : ViewModelBase
             // 收尾：末阶段的结束对账已同步服务端进度，这里只刷新钱包余额
             if (!ApplyWallet(await _game.GetWalletScoreAsync(
                     onRetry: (a, w) => OnRetryNoticeAsync("余额查询", a, w)))) return;
-            CompleteScheduledRun();
-            // 完成态提示由任务卡副标题（StageText）唯一表达，状态栏直接清空避免重复
-            ClearStatus();
+            if (ClaimIndex >= TotalClaims)
+            {
+                CompleteScheduledRun();
+                // 完成态提示由任务卡副标题（StageText）唯一表达，状态栏直接清空避免重复
+                ClearStatus();
+            }
+            else
+            {
+                // 阶段被服务端拒绝导致提前结束时进度不满：不进入完成态，
+                // 否则定时通知会按"已完成"发出成功推送
+                State = RunState.Idle;
+                SetStatus($"本次未完成：{ClaimIndex} / {TotalClaims} 次（部分阶段被服务端拒绝）",
+                    "阶段推送被服务端拒绝，剩余次数未领取", isError: true);
+                _scheduledOutcome ??= $"领取未跑满：{ClaimIndex} / {TotalClaims} 次（部分阶段被服务端拒绝）";
+                DiagLog.Warn($"领取结束但未跑满：{ClaimIndex} / {TotalClaims} 次");
+            }
         }
     }
 
@@ -830,6 +843,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private int _resendSeconds;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasLoginError))]
     private string _loginError = "";
 
     [ObservableProperty]

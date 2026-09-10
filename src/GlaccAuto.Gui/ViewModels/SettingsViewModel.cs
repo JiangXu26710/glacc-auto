@@ -73,6 +73,18 @@ public partial class SettingsViewModel : ViewModelBase
     /// <summary>用户在本会话是否已手动改过计划任务设置；改过之后启动投影不再覆盖其改动</summary>
     private bool _scheduleTouched;
 
+    /// <summary>
+    /// 计划任务变更门：schtasks 是同步外部调用（最长等待 15s），统一放后台线程执行，
+    /// 并经此门串行化——既不阻塞界面，也避免并发的注册/注销互相覆盖。
+    /// </summary>
+    private readonly SemaphoreSlim _scheduleGate = new(1, 1);
+
+    /// <summary>待重注册的时刻；连续改时间时只保留最后一次</summary>
+    private TimeSpan? _pendingScheduleTime;
+
+    /// <summary>是否已有重注册任务在排队或执行</summary>
+    private bool _scheduleWorkerActive;
+
     // 缩放事件保护：还原时静默设置，避免再次触发变更事件
     private bool _suppressScaleEvents;
 
@@ -161,41 +173,40 @@ public partial class SettingsViewModel : ViewModelBase
         if (_suppressScheduleEvents) return;
         _scheduleTouched = true;
         ScheduleError = "";
-        if (value)
+        _ = ApplyScheduleEnabledAsync(value);
+    }
+
+    /// <summary>注册/注销计划任务。schtasks 是同步外部调用，放后台线程执行以免卡住界面；
+    /// 失败按任务真实状态回滚开关，界面始终反映系统实况。</summary>
+    private async Task ApplyScheduleEnabledAsync(bool enabled)
+    {
+        var time = GetScheduledTime();
+        await _scheduleGate.WaitAsync();
+        try
         {
-            try
-            {
-                ScheduledTaskManager.Register(GetScheduledTime());
-            }
-            catch (Exception ex)
-            {
-                // 注册失败：按任务真实状态回滚开关，界面始终反映系统实况
-                DiagLog.Error("定时任务注册失败", ex);
-                ScheduleError = $"定时任务注册失败：{ex.Message}";
-                RevertScheduledEnabled();
-            }
+            if (enabled) await Task.Run(() => ScheduledTaskManager.Register(time));
+            else await Task.Run(ScheduledTaskManager.Unregister);
         }
-        else
+        catch (Exception ex)
         {
-            try
-            {
-                ScheduledTaskManager.Unregister();
-            }
-            catch (Exception ex)
-            {
-                // 注销失败：开关回到"任务仍在"的真实状态，避免界面显示已关而任务照常触发
-                DiagLog.Error("定时任务注销失败", ex);
-                ScheduleError = $"定时任务注销失败：{ex.Message}";
-                RevertScheduledEnabled();
-            }
+            DiagLog.Error(enabled ? "定时任务注册失败" : "定时任务注销失败", ex);
+            ScheduleError = (enabled ? "定时任务注册失败：" : "定时任务注销失败：") + ex.Message;
+            await RevertScheduledEnabledAsync();
+        }
+        finally
+        {
+            _scheduleGate.Release();
         }
     }
 
     /// <summary>按计划任务的真实状态回滚开关（查询失败时视为未启用）。</summary>
-    private void RevertScheduledEnabled()
+    private async Task RevertScheduledEnabledAsync()
     {
-        var enabled = ScheduledTaskManager.TryQuery(out var snapshot)
-            && snapshot is { Enabled: true, TriggerEnabled: true };
+        var enabled = await Task.Run(() =>
+        {
+            return ScheduledTaskManager.TryQuery(out var snapshot)
+                && snapshot is { Enabled: true, TriggerEnabled: true };
+        });
         _suppressScheduleEvents = true;
         try
         {
@@ -215,15 +226,44 @@ public partial class SettingsViewModel : ViewModelBase
         _settings.ScheduledTime = value?.ToString(@"hh\:mm") ?? "08:00";
         _settings.Save();
         if (!ScheduledEnabled) return;
+        _ = RegisterScheduledTaskAsync(GetScheduledTime());
+    }
+
+    /// <summary>按新时刻重注册任务。连续改时间时只保留最后一次：中间值不必各写一遍任务，
+    /// 也避免并发的 schtasks 互相覆盖。</summary>
+    private async Task RegisterScheduledTaskAsync(TimeSpan time)
+    {
+        _pendingScheduleTime = time;
+        if (_scheduleWorkerActive) return;
+        _scheduleWorkerActive = true;
         try
         {
-            ScheduledTaskManager.Register(GetScheduledTime());
-            ScheduleError = "";
+            await _scheduleGate.WaitAsync();
+            try
+            {
+                while (_pendingScheduleTime is { } pending)
+                {
+                    _pendingScheduleTime = null;
+                    try
+                    {
+                        await Task.Run(() => ScheduledTaskManager.Register(pending));
+                        ScheduleError = "";
+                    }
+                    catch (Exception ex)
+                    {
+                        DiagLog.Error("定时任务更新失败", ex);
+                        ScheduleError = $"定时任务更新失败：{ex.Message}";
+                    }
+                }
+            }
+            finally
+            {
+                _scheduleGate.Release();
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            DiagLog.Error("定时任务更新失败", ex);
-            ScheduleError = $"定时任务更新失败：{ex.Message}";
+            _scheduleWorkerActive = false;
         }
     }
 

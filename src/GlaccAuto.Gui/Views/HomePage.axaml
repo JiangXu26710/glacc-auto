@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:GlaccAuto.Gui.ViewModels"
              xmlns:controls="using:GlaccAuto.Gui.Controls"
+             xmlns:fa="using:FluentAvalonia.UI.Controls"
              x:Class="GlaccAuto.Gui.Views.HomePage"
              x:DataType="vm:MainWindowViewModel">
   <!-- 竖排版式：内容列垂直居中；状态栏置于 0 高度行向下溢出绘制，
@@ -62,6 +63,47 @@
                     IsVisible="{Binding IsLoggedIn}"
                     Cursor="Hand" Background="Transparent"
                     Tapped="AccountRow_OnTapped">
+          <!-- 右键二级菜单：刷新数据 / 退出登录；领取进行中两项一并禁用。
+               用 FluentAvalonia 的 MenuFlyout：应用只挂 FluentAvaloniaTheme，
+               核心 ContextMenu 与 MenuFlyout/MenuItem 都拿不到控件模板（实测弹出空窗）。 -->
+          <StackPanel.ContextFlyout>
+            <fa:FAMenuFlyout Placement="Pointer">
+              <fa:MenuFlyoutItem Text="刷新数据" Command="{Binding RefreshDataCommand}"
+                                 IsEnabled="{Binding AccountMenuEnabled}">
+                <fa:MenuFlyoutItem.IconSource>
+                  <fa:FontIconSource Glyph="&#xE72C;" FontFamily="{DynamicResource FontIcons}" FontSize="14"/>
+                </fa:MenuFlyoutItem.IconSource>
+              </fa:MenuFlyoutItem>
+              <fa:MenuFlyoutSeparator/>
+              <fa:MenuFlyoutItem Text="退出登录" Command="{Binding LogoutCommand}"
+                                 IsEnabled="{Binding AccountMenuEnabled}"
+                                 Foreground="{DynamicResource ErrorBrush}">
+                <!-- 官方模板在悬停/按下档会把前景换成中性色、底色换成浅灰，警示色会丢失；
+                     这里就地覆盖这两档：浅红底 + 大红字（色值同 ErrorBrush） -->
+                <fa:MenuFlyoutItem.Resources>
+                  <ResourceDictionary>
+                    <ResourceDictionary.ThemeDictionaries>
+                      <ResourceDictionary x:Key="Light">
+                        <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPointerOver" Color="#1AC42B1C"/>
+                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="#C42B1C"/>
+                        <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPressed" Color="#29C42B1C"/>
+                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="#C42B1C"/>
+                      </ResourceDictionary>
+                      <ResourceDictionary x:Key="Dark">
+                        <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPointerOver" Color="#33FF99A4"/>
+                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="#FF99A4"/>
+                        <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPressed" Color="#4DFF99A4"/>
+                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="#FF99A4"/>
+                      </ResourceDictionary>
+                    </ResourceDictionary.ThemeDictionaries>
+                  </ResourceDictionary>
+                </fa:MenuFlyoutItem.Resources>
+                <fa:MenuFlyoutItem.IconSource>
+                  <fa:FontIconSource Glyph="&#xF3B1;" FontFamily="{DynamicResource FontIcons}" FontSize="14"/>
+                </fa:MenuFlyoutItem.IconSource>
+              </fa:MenuFlyoutItem>
+            </fa:FAMenuFlyout>
+          </StackPanel.ContextFlyout>
           <Border Width="32" Height="32" CornerRadius="16"
                   Background="{DynamicResource AccentSoftBrush}">
             <TextBlock FontFamily="{DynamicResource FontIcons}" Text="&#xE77B;" FontSize="16"

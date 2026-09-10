@@ -65,6 +65,7 @@ public partial class MainWindowViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(ButtonText))]
     [NotifyPropertyChangedFor(nameof(ButtonEnabled))]
     [NotifyPropertyChangedFor(nameof(SpinnerVisible))]
+    [NotifyPropertyChangedFor(nameof(AccountMenuEnabled))]
     private RunState _state = RunState.Idle;
 
     [ObservableProperty]
@@ -244,6 +245,9 @@ public partial class MainWindowViewModel : ViewModelBase
     public bool IsRunning => State == RunState.Running;
     public bool ButtonEnabled => State == RunState.Idle && IsLoggedIn;
     public bool SpinnerVisible => State == RunState.Running;
+
+    /// <summary>账号区右键菜单可用：领取进行中进度与余额在实时推进，刷新无意义且退出会中断领取</summary>
+    public bool AccountMenuEnabled => State != RunState.Running;
 
     public string ButtonText => !IsLoggedIn
         ? "请先登录"
@@ -817,6 +821,78 @@ public partial class MainWindowViewModel : ViewModelBase
         if (HasStatusDetail) lines.Add($"详情：{StatusDetail}");
         lines.Add($"日志：{DiagLog.CurrentFilePath}");
         return string.Join(Environment.NewLine, lines);
+    }
+
+    // ── 账号区右键菜单 ──
+
+    /// <summary>刷新数据进行中：避免连点发起并发请求（与余额重试的 BalanceBusy 相互独立）</summary>
+    [ObservableProperty]
+    private bool _dataRefreshBusy;
+
+    /// <summary>退出登录二次确认层是否显示</summary>
+    [ObservableProperty]
+    private bool _showLogoutConfirm;
+
+    /// <summary>
+    /// 重新拉取今日任务进度与钱包余额（只读请求，无副作用）。
+    /// 成功不写状态栏：余额与进度数字自身会更新，状态栏只留给需要用户处理的失败。
+    /// </summary>
+    [RelayCommand]
+    private async Task RefreshDataAsync()
+    {
+        if (!IsLoggedIn || DataRefreshBusy) return;
+        DataRefreshBusy = true;
+        try
+        {
+            if (await RefreshSnapshotAsync()) DiagLog.Info($"数据已刷新：{BalanceSummary}");
+        }
+        catch (Exception ex)
+        {
+            // 只读刷新不动运行状态机，异常就地进状态栏
+            DiagLog.Error("刷新数据异常", ex);
+            SetStatus($"刷新数据失败：{ex.Message}", GlaccSession.Describe(ex), isError: true);
+        }
+        finally
+        {
+            DataRefreshBusy = false;
+        }
+    }
+
+    /// <summary>请求退出登录：先弹二次确认，确认后才清除本地会话。</summary>
+    [RelayCommand]
+    private void Logout()
+    {
+        if (!IsLoggedIn) return;
+        ShowLogoutConfirm = true;
+    }
+
+    [RelayCommand]
+    private void CancelLogout() => ShowLogoutConfirm = false;
+
+    /// <summary>
+    /// 确认退出登录：清除本地令牌并回到未登录状态；手机号、设备标识与设备档案保留，
+    /// 重新登录时预填原手机号、沿用原设备指纹。
+    /// </summary>
+    [RelayCommand]
+    private void ConfirmLogout()
+    {
+        ShowLogoutConfirm = false;
+        _cred.ClearSession();
+        _cred.Save();
+
+        IsLoggedIn = false;
+        PhoneRevealed = false;
+        Accounts.Clear();
+        State = RunState.Idle;
+        _stages = [];
+        SegmentSizes = [];
+        TotalClaims = 0;
+        ClaimIndex = 0;
+        BalanceFetched = false;
+        BalanceHint = "";
+        BalanceMinutes = 0;
+        ClearStatus();
+        DiagLog.Info("已退出登录：本地会话已清除，手机号与设备标识保留");
     }
 
     // ── 登录引导（真实流程：手机号 + 短信验证码）──

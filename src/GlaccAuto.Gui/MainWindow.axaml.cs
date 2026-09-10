@@ -146,6 +146,12 @@ public partial class MainWindow : Window
         _vm.CancelExitCommand.Execute(null);
     }
 
+    /// <summary>点击退出登录确认层遮罩：取消退出。</summary>
+    private void OnLogoutScrimPressed(object? sender, PointerPressedEventArgs e)
+    {
+        _vm.CancelLogoutCommand.Execute(null);
+    }
+
     /// <summary>
     /// 点击登录对话框遮罩：取消登录。验证码步骤忽略遮罩点击，
     /// 避免误触把已发出的验证码作废、需重新发送。

@@ -93,6 +93,21 @@ public sealed class GlaccCredentials
         }
     }
 
+    /// <summary>
+    /// 退出登录：清空会话态（访问令牌、刷新令牌与进行中的短信登录），
+    /// 保留手机号、设备标识与设备档案，使同一账号重新登录时沿用原设备指纹。
+    /// 不含持久化，调用方按需再存盘。
+    /// </summary>
+    public void ClearSession()
+    {
+        AccessToken = "";
+        RefreshToken = "";
+        ObtainedAt = 0;
+        ExpiresIn = 7200;
+        VerificationId = "";
+        VerificationIdAt = 0;
+    }
+
     /// <summary>首次使用时生成本机随机设备标识（32 位 hex）。</summary>
     public void EnsureDeviceIds()
     {

@@ -17,6 +17,12 @@ public static class AppInfo
     /// <summary>项目主页地址，供链接控件跳转</summary>
     public static readonly Uri HomepageUri = new(HomepageUrl);
 
+    /// <summary>Server酱登录地址（登录后可取得 SendKey）</summary>
+    public const string ServerChanLoginUrl = "https://sct.ftqq.com/login";
+
+    /// <summary>Server酱登录地址，供链接控件跳转</summary>
+    public static readonly Uri ServerChanLoginUri = new(ServerChanLoginUrl);
+
     private static string ReadVersion()
     {
         var informational = typeof(AppInfo).Assembly

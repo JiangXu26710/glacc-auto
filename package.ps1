@@ -4,7 +4,7 @@
 #   .\package.ps1 -Launch        # 打包后启动应用
 #   .\package.ps1 -Version 0.2.0 # 覆盖版本号（同时写入程序集与 zip 文件名）
 #   .\package.ps1 -BuildToolsRoot <路径>   # 手动指定生成工具安装目录
-# 产物：dist\glacc-auto-win-x64\（5 文件平铺）+ dist\glacc-auto-v<版本>-win-x64.zip
+# 产物：dist\glacc-auto-v<版本>-win-x64.zip（内含 5 个运行文件 + LICENSE/NOTICE/DISCLAIMER.md）
 # 工具链定位顺序：-BuildToolsRoot → 环境变量 GLACC_BUILDTOOLS → vswhere 探测 → 常见默认位置
 [CmdletBinding()]
 param(
@@ -127,7 +127,7 @@ $ErrorActionPreference = "Stop"
 if ($publishExit -ne 0) { throw "dotnet publish 失败（exit $publishExit）" }
 $publishDir = Join-Path $repo "src\GlaccAuto.Gui\bin\Release\net10.0\win-x64\publish"
 
-# ── 5) 暂存：发布最小集 5 文件（剔 pdb 与运行时生成的 NVIDIA 目录）──
+# ── 5) 暂存：发布最小集 5 文件（剔 pdb 与运行时生成的 NVIDIA 目录）+ 许可与免责元文件 ──
 $files = @("GlaccAuto.Gui.exe", "av_libglesv2.dll", "libHarfBuzzSharp.dll", "libSkiaSharp.dll", "tls-client.dll")
 if (-not (Test-Path (Join-Path $publishDir "tls-client.dll"))) {
     throw "发布目录缺少 tls-client.dll（CopyTlsClientToPublish 未生效？）"
@@ -135,8 +135,12 @@ if (-not (Test-Path (Join-Path $publishDir "tls-client.dll"))) {
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item $stage -ItemType Directory -Force | Out-Null
 foreach ($f in $files) { Copy-Item (Join-Path $publishDir $f) $stage }
+foreach ($f in @("LICENSE", "NOTICE", "DISCLAIMER.md")) {
+    if (-not (Test-Path (Join-Path $repo $f))) { throw "仓库根缺少 $f" }
+    Copy-Item (Join-Path $repo $f) $stage
+}
 
-# ── 6) 打 zip：解压后是单个文件夹（内含 5 文件），避免解压炸开 ──
+# ── 6) 打 zip：解压后是单个文件夹（内含运行文件与许可免责元文件），避免解压炸开 ──
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip,

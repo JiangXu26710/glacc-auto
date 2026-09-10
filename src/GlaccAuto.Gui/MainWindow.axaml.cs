@@ -47,6 +47,16 @@ public partial class MainWindow : Window
         // 启动时按持久化缩放应用（不弹保护确认）
         _confirmedScalePercent = settings.ScalePercent;
         ApplyScale(settings.ScalePercent);
+
+        StartShowSignalListener();
+
+        // 计划任务拉起：窗口直接以最小化显示且不夺取焦点，避免打断用户当前操作；
+        // 需要查看时点任务栏图标即可，领取结果另有 Server酱通知与窗口内提示。
+        if (scheduledLaunch)
+        {
+            ShowActivated = false;
+            WindowState = WindowState.Minimized;
+        }
     }
 
     /// <summary>布局级缩放：窗口与内容同比（LayoutTransform 重排版，文字清晰）。</summary>
@@ -135,12 +145,43 @@ public partial class MainWindow : Window
         _vm.CancelExitCommand.Execute(null);
     }
 
+    /// <summary>
+    /// 监听"唤出窗口"信号：手动启动了第二个实例（单实例接管）时，
+    /// 把窗口从最小化恢复到前台。计划任务拉起的实例不主动打扰用户，只响应用户的手动启动。
+    /// </summary>
+    private void StartShowSignalListener()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var signal = new EventWaitHandle(false, EventResetMode.AutoReset, Program.ShowSignalName);
+                while (signal.WaitOne())
+                {
+                    await Dispatcher.UIThread.InvokeAsync(BringToFront);
+                }
+            }
+            catch
+            {
+                // 信号监听不可用仅损失"手动启动时唤出窗口"能力，不影响领取流程
+            }
+        });
+    }
+
+    /// <summary>恢复最小化的窗口并置于前台。</summary>
+    private void BringToFront()
+    {
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+    }
+
     protected override void OnClosing(WindowClosingEventArgs e)
     {
-        // 领取中关闭窗口：拦截并弹二次确认
+        // 领取中关闭窗口：拦截并弹二次确认；窗口最小化时先恢复，否则确认层在任务栏里看不见
         if (!_vm.ExitConfirmed && _vm.State == RunState.Running)
         {
             e.Cancel = true;
+            if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
             _vm.ShowExitConfirm = true;
         }
         StopScaleTimer();

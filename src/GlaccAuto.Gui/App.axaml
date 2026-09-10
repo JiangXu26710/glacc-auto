@@ -197,9 +197,13 @@
     <Style Selector="Button.navBtn.selected Border.navPill">
       <Setter Property="Opacity" Value="1"/>
     </Style>
+    <!-- 导航栏图标：行盒须高于 1 em。图标字形的墨迹最高可占满整 1 em（设置齿轮即如此），
+         行盒与字形等高时字形顶边正好压在行盒上边界，会被像素对齐抹掉约 1px；
+         余高由上下均分，字形仍垂直居中，视觉位置不变 -->
     <Style Selector="TextBlock.navIcon">
       <Setter Property="FontFamily" Value="{DynamicResource FontIcons}"/>
       <Setter Property="FontSize" Value="18"/>
+      <Setter Property="LineHeight" Value="22"/>
       <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
       <Setter Property="HorizontalAlignment" Value="Center"/>
       <Setter Property="VerticalAlignment" Value="Center"/>

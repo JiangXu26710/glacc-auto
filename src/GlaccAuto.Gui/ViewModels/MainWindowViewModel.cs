@@ -117,6 +117,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(AccountName))]
+    [NotifyPropertyChangedFor(nameof(UserIdText))]
     [NotifyPropertyChangedFor(nameof(BalanceHoursText))]
     [NotifyPropertyChangedFor(nameof(BalanceMinutesText))]
     [NotifyPropertyChangedFor(nameof(HasBalanceHint))]

@@ -22,10 +22,10 @@ public partial class MainWindow : Window
     private int _countdown;
     private DispatcherTimer? _scaleTimer;
 
-    public MainWindow(AppSettings settings)
+    public MainWindow(AppSettings settings, bool scheduledLaunch)
     {
         InitializeComponent();
-        _vm = new MainWindowViewModel(settings);
+        _vm = new MainWindowViewModel(settings, scheduledLaunch);
         DataContext = _vm;
         _vm.CloseRequested += Close;
         _vm.Settings.ScaleChangeRequested += OnScaleChangeRequested;

@@ -42,12 +42,17 @@ public partial class SettingsPage : UserControl
         ServerKeyBox.PasswordChar = '●';
     }
 
-    // 领取间隔：失焦时再触发一次校验（UpdateSourceTrigger=LostFocus 使绑定在失焦时更新源）
+    // 领取间隔：失焦时以输入框文本为准做夹紧校验，并把合法值直接写回控件
+    // （失焦触发的绑定写源过程中，VM 侧的属性变更回写会被绑定引擎抑制，文本无法经绑定自动纠正）
     private void IntervalBox_OnLostFocus(object? sender, RoutedEventArgs e)
     {
-        if (DataContext is ViewModels.SettingsViewModel vm)
+        if (sender is TextBox box && DataContext is ViewModels.SettingsViewModel vm)
         {
-            vm.ValidateIntervals();
+            var coerced = vm.CoerceIntervalInput(box.Text, isMin: box == IntervalMinBox);
+            if (box.Text != coerced)
+            {
+                box.Text = coerced;
+            }
         }
     }
 
@@ -99,20 +104,6 @@ public partial class SettingsPage : UserControl
         if (double.IsNaN(h)) h = 0;
         var op = ScheduleSubCard.Opacity;
         var y = ((Avalonia.Media.TranslateTransform?)ScheduleSubCard.RenderTransform)?.Y ?? -10;
-        DebugLog($"{(expanding ? "EXPAND" : "COLLAPSE")} start: h={h:0.##} op={op:0.##} y={y:0.##}");
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        System.Diagnostics.Stopwatch? sampleClock = null;
-        DispatcherTimer? sampler = null;
-        if (!expanding)
-        {
-            // 收起期间每 33ms 采样实际排布高度，定位"停顿+闪现"点
-            sampleClock = System.Diagnostics.Stopwatch.StartNew();
-            sampler = new DispatcherTimer(TimeSpan.FromMilliseconds(33), DispatcherPriority.Normal, (_, _) =>
-            {
-                DebugLog($"  collapse t={sampleClock.ElapsedMilliseconds}ms arrangedH={ScheduleSub.Bounds.Height:0.##} opacity={ScheduleSubCard.Opacity:0.##}");
-            });
-            sampler.Start();
-        }
         try
         {
             if (expanding)
@@ -136,29 +127,10 @@ public partial class SettingsPage : UserControl
                     .RunAsync(ScheduleSub, ct);
                 ScheduleSub.IsVisible = false;
             }
-            DebugLog($"{(expanding ? "EXPAND" : "COLLAPSE")} done: elapsed={sw.ElapsedMilliseconds}ms h={ScheduleSub.Height:0.##}");
         }
-        catch (OperationCanceledException exc)
+        catch (OperationCanceledException)
         {
-            DebugLog($"{(expanding ? "EXPAND" : "COLLAPSE")} cancelled at {sw.ElapsedMilliseconds}ms: {exc.Message}");
-        }
-        finally
-        {
-            sampler?.Stop();
-        }
-    }
-
-    private static void DebugLog(string msg)
-    {
-        try
-        {
-            System.IO.File.AppendAllText(
-                @"D:\ZaWu\FormatFactory\GitHub\glacc-auto\work\reveal_debug.log",
-                $"{DateTime.Now:HH:mm:ss.fff} {msg}\n");
-        }
-        catch
-        {
-            // 日志失败不影响 UI
+            // 快速连点时上一次动画被取消，属正常路径
         }
     }
 

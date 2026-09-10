@@ -1,5 +1,7 @@
+using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using GlaccAuto.Core;
+using GlaccAuto.Core.Scheduling;
 
 namespace GlaccAuto.Gui.ViewModels;
 
@@ -57,6 +59,16 @@ public partial class SettingsViewModel : ViewModelBase
     /// <summary>"定时领取"子行展开状态（点击行头切换，不持久化）</summary>
     [ObservableProperty]
     private bool _scheduleExpanded;
+
+    /// <summary>计划任务注册/注销失败提示（空 = 无错误）</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasScheduleError))]
+    private string _scheduleError = "";
+
+    public bool HasScheduleError => !string.IsNullOrEmpty(ScheduleError);
+
+    /// <summary>注册失败回滚开关时静默，避免再次触发变更处理</summary>
+    private bool _suppressScheduleEvents;
 
     // 缩放事件保护：还原时静默设置，避免再次触发变更事件
     private bool _suppressScaleEvents;
@@ -121,15 +133,59 @@ public partial class SettingsViewModel : ViewModelBase
 
     partial void OnScheduledEnabledChanged(bool value)
     {
+        if (_suppressScheduleEvents) return;
         _settings.ScheduledEnabled = value;
         _settings.Save();
+        ScheduleError = "";
+        if (value)
+        {
+            try
+            {
+                ScheduledTaskManager.Register(GetScheduledTime());
+            }
+            catch (Exception ex)
+            {
+                // 注册失败：回滚开关与持久化值，卡片内提示原因
+                ScheduleError = $"定时任务注册失败：{ex.Message}";
+                _suppressScheduleEvents = true;
+                ScheduledEnabled = false;
+                _suppressScheduleEvents = false;
+                _settings.ScheduledEnabled = false;
+                _settings.Save();
+            }
+        }
+        else
+        {
+            try
+            {
+                ScheduledTaskManager.Unregister();
+            }
+            catch (Exception ex)
+            {
+                ScheduleError = $"定时任务注销失败：{ex.Message}";
+            }
+        }
     }
 
     partial void OnScheduledTimeChanged(TimeSpan? value)
     {
         _settings.ScheduledTime = value?.ToString(@"hh\:mm") ?? "08:00";
         _settings.Save();
+        if (!_settings.ScheduledEnabled) return;
+        try
+        {
+            ScheduledTaskManager.Register(GetScheduledTime());
+            ScheduleError = "";
+        }
+        catch (Exception ex)
+        {
+            ScheduleError = $"定时任务更新失败：{ex.Message}";
+        }
     }
+
+    private TimeSpan GetScheduledTime() =>
+        TimeSpan.TryParse(_settings.ScheduledTime, CultureInfo.InvariantCulture, out var t)
+            ? t : new TimeSpan(8, 0, 0);
 
     partial void OnServerKeyChanged(string value)
     {
@@ -138,29 +194,42 @@ public partial class SettingsViewModel : ViewModelBase
     }
 
     // 领取间隔校验：必须为数字、范围 1~3600 秒、且 min ≤ max；
-    // 非法输入回退为上一个有效值（TextBox 文本随之回写）
-    partial void OnIntervalMinChanged(string value)
+    // 非法输入夹紧为有效值后落盘，并同步 VM 字段
+    partial void OnIntervalMinChanged(string value) => CoerceAndApply(value, isMin: true);
+
+    partial void OnIntervalMaxChanged(string value) => CoerceAndApply(value, isMin: false);
+
+    /// <summary>失焦校验入口：以输入框当前文本为输入做夹紧并落盘，返回合法字符串，
+    /// 供视图直接写回控件（双向绑定在失焦写源过程中会抑制 VM 的回写，不能依赖绑定同步文本）。</summary>
+    public string CoerceIntervalInput(string? text, bool isMin) => CoerceAndApply(text, isMin);
+
+    private string CoerceAndApply(string? input, bool isMin)
     {
-        var coerced = CoerceInterval(value, _settings.IntervalMinSec, _settings.IntervalMaxSec, isMin: true);
-        _settings.IntervalMinSec = int.Parse(coerced);
-        _settings.Save();
-        if (coerced != value)
+        var coerced = isMin
+            ? CoerceInterval(input, _settings.IntervalMinSec, _settings.IntervalMaxSec, isMin: true)
+            : CoerceInterval(input, _settings.IntervalMaxSec, _settings.IntervalMinSec, isMin: false);
+        var n = int.Parse(coerced);
+        if (isMin && _settings.IntervalMinSec != n)
+        {
+            _settings.IntervalMinSec = n;
+            _settings.Save();
+        }
+        else if (!isMin && _settings.IntervalMaxSec != n)
+        {
+            _settings.IntervalMaxSec = n;
+            _settings.Save();
+        }
+        if (isMin && _intervalMin != coerced)
         {
             _intervalMin = coerced;
             OnPropertyChanged(nameof(IntervalMin));
         }
-    }
-
-    partial void OnIntervalMaxChanged(string value)
-    {
-        var coerced = CoerceInterval(value, _settings.IntervalMaxSec, _settings.IntervalMinSec, isMin: false);
-        _settings.IntervalMaxSec = int.Parse(coerced);
-        _settings.Save();
-        if (coerced != value)
+        else if (!isMin && _intervalMax != coerced)
         {
             _intervalMax = coerced;
             OnPropertyChanged(nameof(IntervalMax));
         }
+        return coerced;
     }
 
     private string CoerceInterval(string? input, int current, int other, bool isMin)
@@ -171,13 +240,6 @@ public partial class SettingsViewModel : ViewModelBase
         if (isMin && n > other) n = other;
         if (!isMin && n < other) n = other;
         return n.ToString();
-    }
-
-    /// <summary>失焦时强制复核（供视图层 LostFocus 调用），非法文本回写为有效值。</summary>
-    public void ValidateIntervals()
-    {
-        IntervalMin = CoerceInterval(IntervalMin, _settings.IntervalMinSec, _settings.IntervalMaxSec, isMin: true);
-        IntervalMax = CoerceInterval(IntervalMax, _settings.IntervalMaxSec, _settings.IntervalMinSec, isMin: false);
     }
 
     partial void OnThemeIndexChanged(int value)

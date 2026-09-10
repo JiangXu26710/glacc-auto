@@ -26,6 +26,7 @@
           <SolidColorBrush x:Key="NavSelectedBrush" Color="#14000000"/>
           <SolidColorBrush x:Key="SelectionPillBrush" Color="#0067C0"/>
           <SolidColorBrush x:Key="PopupBgBrush" Color="#FAFAFA"/>
+          <SolidColorBrush x:Key="ErrorBrush" Color="#C42B1C"/>
           <!-- 控件悬停/按下载体色（原 Avalonia FluentTheme 提供，现自行定义） -->
           <SolidColorBrush x:Key="ControlFillColorSecondaryBrush" Color="#0A000000"/>
           <SolidColorBrush x:Key="ControlFillColorTertiaryBrush" Color="#06000000"/>
@@ -49,6 +50,7 @@
           <SolidColorBrush x:Key="NavSelectedBrush" Color="#14FFFFFF"/>
           <SolidColorBrush x:Key="SelectionPillBrush" Color="#60CDFF"/>
           <SolidColorBrush x:Key="PopupBgBrush" Color="#2C2C2C"/>
+          <SolidColorBrush x:Key="ErrorBrush" Color="#FF99A4"/>
           <SolidColorBrush x:Key="ControlFillColorSecondaryBrush" Color="#0FFFFFFF"/>
           <SolidColorBrush x:Key="ControlFillColorTertiaryBrush" Color="#0AFFFFFF"/>
           <SolidColorBrush x:Key="SmokeBrush" Color="#66000000"/>
@@ -310,6 +312,11 @@
     <Style Selector="TextBox">
       <Setter Property="Height" Value="32"/>
       <Setter Property="FontSize" Value="14"/>
+      <!-- 单行输入框不需要竖向滚动：关掉内建竖向滚动条，避免悬停时浮出上下调节箭头 -->
+      <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled"/>
+    </Style>
+    <Style Selector="TextBox /template/ ScrollViewer#PART_ScrollViewer">
+      <Setter Property="VerticalScrollBarVisibility" Value="Disabled"/>
     </Style>
     <Style Selector="ComboBox">
       <Setter Property="Height" Value="32"/>

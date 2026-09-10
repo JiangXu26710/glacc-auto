@@ -1,8 +1,11 @@
+using System.Globalization;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using GlaccAuto.Core;
 using GlaccAuto.Core.Glacc;
+using GlaccAuto.Core.Notify;
+using GlaccAuto.Core.Scheduling;
 
 namespace GlaccAuto.Gui.ViewModels;
 
@@ -10,6 +13,7 @@ namespace GlaccAuto.Gui.ViewModels;
 /// 主窗口视图模型：接入真实业务。
 /// 登录态（refresh 保活 / 短信登录）、任务进度与钱包（mobileGLTaskList / get_user_wallet）、
 /// 主任务52 各阶段直推（mobileGLTaskPush，MD5 签名）均走 GlaccAuto.Core.Glacc 协议层。
+/// 定时领取（Windows 计划任务）在此调度：计划任务拉起时自动执行领取，成功后自动退出。
 /// </summary>
 public partial class MainWindowViewModel : ViewModelBase
 {
@@ -18,13 +22,18 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly GlaccAuthClient _auth;
     private readonly GlaccSession _session;
     private readonly GlaccGameClient _game;
+    private readonly bool _scheduledLaunch;
 
     /// <summary>当前任务阶段（服务端每日可变，从 mobileGLTaskList 动态读取）</summary>
     private List<GlaccTaskStage> _stages = [];
 
-    public MainWindowViewModel(AppSettings settings)
+    /// <summary>本次定时运行的失败原因（null = 成功或未运行）；供 Server酱结果通知使用</summary>
+    private string? _scheduledOutcome;
+
+    public MainWindowViewModel(AppSettings settings, bool scheduledLaunch = false)
     {
         _settings = settings;
+        _scheduledLaunch = scheduledLaunch;
         Settings = new SettingsViewModel(settings);
         Settings.ScaleChangeRequested += p => ScaleChangeRequested?.Invoke(p);
 
@@ -32,6 +41,8 @@ public partial class MainWindowViewModel : ViewModelBase
         _auth = new GlaccAuthClient(_cred);
         _session = new GlaccSession(_cred, _auth, () => _settings.NetworkRetryCount);
         _game = new GlaccGameClient(_cred, _session);
+        StartClaimSignalListener();
+        CalibrateScheduledTask();
         _ = InitializeAsync();
     }
 
@@ -214,6 +225,14 @@ public partial class MainWindowViewModel : ViewModelBase
             if (!_cred.HasToken && !_cred.HasRefreshToken)
             {
                 StatusText = "";
+                if (_scheduledLaunch)
+                {
+                    // 定时拉起但无可用登录态：留在登录引导，不自动退出，发失败通知
+                    StatusText = "定时领取：尚未登录";
+                    _scheduledOutcome ??= "尚未登录，需要先完成短信登录";
+                    _ = NotifyScheduledOutcomeAsync();
+                    OpenLogin();
+                }
                 return;
             }
             // JWT 仍在有效期且未到 refresh_token 保活间隔：直接复用本地登录态，不打刷新请求
@@ -225,16 +244,21 @@ public partial class MainWindowViewModel : ViewModelBase
                 {
                     IsLoggedIn = false;
                     StatusText = r.Error;
+                    if (!r.NeedRelogin) _scheduledOutcome ??= r.Error;
                     // 登录已过期（invalid_grant）：打开登录引导，预填手机号
                     if (r.NeedRelogin) HandleRelogin();
+                    if (_scheduledLaunch) _ = NotifyScheduledOutcomeAsync();
                     return;
                 }
             }
             await EnterLoggedInAsync();
+            if (_scheduledLaunch) await RunScheduledClaimAsync();
         }
         catch (Exception ex)
         {
             StatusText = $"初始化失败：{ex.Message}";
+            _scheduledOutcome ??= $"初始化失败：{ex.Message}";
+            if (_scheduledLaunch) _ = NotifyScheduledOutcomeAsync();
         }
     }
 
@@ -278,6 +302,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         StatusText = networkError;
         State = RunState.Idle;
+        _scheduledOutcome ??= networkError;
         return false;
     }
 
@@ -286,6 +311,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         State = RunState.Idle;
         StatusText = "登录已过期，请重新短信登录";
+        _scheduledOutcome ??= "登录已过期，需要重新短信登录";
         IsSettingsOpen = false;
         OpenLogin();
     }
@@ -322,7 +348,11 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             StatusText = "正在同步任务…";
             await RefreshSnapshotAsync();
-            if (TotalClaims == 0) return;
+            if (TotalClaims == 0)
+            {
+                _scheduledOutcome ??= "服务端今日暂无任务数据";
+                return;
+            }
         }
         State = RunState.Running;
         StatusText = "";
@@ -333,6 +363,7 @@ public partial class MainWindowViewModel : ViewModelBase
         catch (Exception ex)
         {
             StatusText = $"领取中断：{ex.Message}";
+            _scheduledOutcome ??= $"领取中断：{ex.Message}";
             State = ClaimIndex >= TotalClaims && TotalClaims > 0 ? RunState.Done : RunState.Idle;
         }
     }
@@ -355,7 +386,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 return;
             }
             if (wallet.Ok) BalanceMinutes = ScoreToMinutes(wallet.Value);
-            State = RunState.Done;
+            CompleteScheduledRun();
             return;
         }
 
@@ -412,6 +443,7 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 ApplyStages(serverStages);
                 StatusText = $"进度对账异常（本地 {ClaimIndex} 次 / 服务端 {serverCount} 次），已停止领取";
+                _scheduledOutcome ??= $"进度对账异常（本地 {ClaimIndex} 次 / 服务端 {serverCount} 次）";
                 State = RunState.Idle;
                 return;
             }
@@ -428,7 +460,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 return;
             }
             if (wallet.Ok) BalanceMinutes = ScoreToMinutes(wallet.Value);
-            State = RunState.Done;
+            CompleteScheduledRun();
             // 完成态提示由任务卡副标题（StageText）唯一表达，状态栏直接清空避免重复
             StatusText = "";
         }
@@ -441,6 +473,105 @@ public partial class MainWindowViewModel : ViewModelBase
         var max = Math.Clamp(_settings.IntervalMaxSec, min, 3600);
         return TimeSpan.FromSeconds(Random.Shared.Next(min, max + 1));
     }
+
+    // ── 定时领取（Windows 计划任务）──
+
+    /// <summary>
+    /// 领取到达完成态：进入 Done。定时拉起的自动退出由 RunScheduledClaimAsync 在
+    /// 发送结果通知后执行；异常终态（网络中断/需重登/对账异常）到不了这里，窗口保持打开。
+    /// </summary>
+    private void CompleteScheduledRun()
+    {
+        State = RunState.Done;
+        _scheduledOutcome = null; // 成功无需原因
+    }
+
+    /// <summary>
+    /// 定时发起的领取编排（计划任务拉起 / 运行中实例收到信号代跑）：
+    /// 跑完一次领取 → 若配置了 Server酱则发送一条结果通知 → 定时拉起且领取正常跑通时自动退出。
+    /// </summary>
+    private async Task RunScheduledClaimAsync()
+    {
+        _scheduledOutcome = null;
+        try
+        {
+            await StartAsync();
+        }
+        catch
+        {
+            // StartAsync 内部已兜底记录终态，这里防编排本身被打断导致通知缺失
+        }
+        await NotifyScheduledOutcomeAsync();
+        if (_scheduledLaunch && State == RunState.Done)
+        {
+            ExitConfirmed = true;
+            CloseRequested?.Invoke();
+        }
+    }
+
+    /// <summary>发送本次定时运行结果通知；未配置 Server酱或发送失败均静默忽略。</summary>
+    private async Task NotifyScheduledOutcomeAsync()
+    {
+        var key = _settings.ServerKey;
+        if (!ServerChanClient.IsConfigured(key)) return;
+        var success = State == RunState.Done;
+        var now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        var desp = success
+            ? $"**定时领取完成**\n\n- 时间: {now}\n- 当前余额: {BalanceHours} 小时 {((int)Math.Round(BalanceMinutes)) % 60:00} 分钟"
+            : $"**定时领取未完成**\n\n- 时间: {now}\n- 原因: {_scheduledOutcome ?? "未知原因"}";
+        await ServerChanClient.SendAsync(key.Trim(),
+            success ? "glacc-auto 定时领取成功" : "glacc-auto 定时领取失败", desp);
+    }
+
+    /// <summary>监听"到点领取"信号：计划任务拉起了第二个实例，而本实例已在运行时，由本实例代为执行。</summary>
+    private void StartClaimSignalListener()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var signal = new EventWaitHandle(false, EventResetMode.AutoReset, Program.ClaimSignalName);
+                while (signal.WaitOne())
+                {
+                    await Dispatcher.UIThread.InvokeAsync(OnClaimSignal);
+                }
+            }
+            catch
+            {
+                // 信号监听不可用仅损失"运行中代跑"能力，不影响手动领取主流程
+            }
+        });
+    }
+
+    private void OnClaimSignal()
+    {
+        if (IsLoggedIn && State == RunState.Idle) _ = RunScheduledClaimAsync();
+    }
+
+    /// <summary>
+    /// 计划任务自校准：开关开启时比对任务真实状态（XML 导出），
+    /// 与预期不符（不存在/被禁用/时间或路径与参数变更）则静默重注册一次。
+    /// </summary>
+    private void CalibrateScheduledTask()
+    {
+        if (!_settings.ScheduledEnabled) return;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var time = ParseScheduledTime(_settings.ScheduledTime);
+                if (!ScheduledTaskManager.MatchesExpectation(ScheduledTaskManager.Query(), time))
+                    ScheduledTaskManager.Register(time);
+            }
+            catch
+            {
+                // 校准失败静默：不影响应用启动与手动领取
+            }
+        });
+    }
+
+    private static TimeSpan ParseScheduledTime(string s) =>
+        TimeSpan.TryParse(s, CultureInfo.InvariantCulture, out var t) ? t : new TimeSpan(8, 0, 0);
 
     /// <summary>钱包 score → 分钟（80 score = 1 分钟，官方账号页实测）。</summary>
     private static double ScoreToMinutes(long score) => score / GlaccConstants.ScorePerMinute;

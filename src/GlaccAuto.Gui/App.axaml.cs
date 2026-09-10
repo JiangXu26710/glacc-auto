@@ -27,7 +27,10 @@ public partial class App : Application
 
             var settings = AppSettings.Load();
             ApplyTheme(settings.Theme);
-            desktop.MainWindow = new MainWindow(settings);
+            // 计划任务以 --scheduled 参数拉起：恢复登录态后自动执行领取
+            var scheduledLaunch = desktop.Args?.Any(
+                a => a.Equals("--scheduled", StringComparison.OrdinalIgnoreCase)) == true;
+            desktop.MainWindow = new MainWindow(settings, scheduledLaunch);
         }
         base.OnFrameworkInitializationCompleted();
     }

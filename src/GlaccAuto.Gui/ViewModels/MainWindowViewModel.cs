@@ -511,17 +511,22 @@ public partial class MainWindowViewModel : ViewModelBase
             OpenLogin();
             return;
         }
-        if (State != RunState.Idle) return;
-        if (TotalClaims == 0)
+        // Done = 上次领取已完成（多为昨日遗留）：定时信号代跑需跨日重新领取，
+        // 先重新同步当日进度再决定是否进入领取；Idle 且无任务数据时同样先同步
+        if (State is not (RunState.Idle or RunState.Done)) return;
+        if (TotalClaims == 0 || State == RunState.Done)
         {
             SetStatus("正在同步任务…");
-            await RefreshSnapshotAsync();
+            // 同步失败时 TryHandle / HandleRelogin 已写终态与 _scheduledOutcome，直接中断
+            if (!await RefreshSnapshotAsync()) return;
             if (TotalClaims == 0)
             {
                 _scheduledOutcome ??= "服务端今日暂无任务数据";
                 DiagLog.Warn("服务端今日未返回主任务数据，放弃本次领取");
                 return;
             }
+            // 同步后仍为 Done：服务端显示今日已完成，无需再领
+            if (State != RunState.Idle) return;
         }
         State = RunState.Running;
         ClearStatus();
@@ -608,13 +613,15 @@ public partial class MainWindowViewModel : ViewModelBase
             if (!TryHandle(server, "已中断")) return;
             var serverStages = server.Value!;
             var serverCount = serverStages.Sum(s => s.StageCurrent);
-            if (ClaimIndex > serverCount)
+            // ApplyStages 会把 ClaimIndex 覆盖为服务端计数，先存下本地值，消息里才能如实报告差异
+            var localCount = ClaimIndex;
+            if (localCount > serverCount)
             {
                 ApplyStages(serverStages);
-                SetStatus($"进度对账异常（本地 {ClaimIndex} 次 / 服务端 {serverCount} 次），已停止领取",
+                SetStatus($"进度对账异常（本地 {localCount} 次 / 服务端 {serverCount} 次），已停止领取",
                     "服务端进度少于本地已确认的领取次数，发放链路可能已失效", isError: true);
-                _scheduledOutcome ??= $"进度对账异常（本地 {ClaimIndex} 次 / 服务端 {serverCount} 次）";
-                DiagLog.Error($"进度对账异常：本地 {ClaimIndex} 次 / 服务端 {serverCount} 次，已停止领取");
+                _scheduledOutcome ??= $"进度对账异常（本地 {localCount} 次 / 服务端 {serverCount} 次）";
+                DiagLog.Error($"进度对账异常：本地 {localCount} 次 / 服务端 {serverCount} 次，已停止领取");
                 State = RunState.Idle;
                 return;
             }
@@ -731,9 +738,13 @@ public partial class MainWindowViewModel : ViewModelBase
 
     private void OnClaimSignal()
     {
-        if (IsLoggedIn && State == RunState.Idle)
+        // Idle = 常规代跑；Done = 上次已完成（多为昨日遗留），
+        // StartAsync 会先重新同步当日进度：已复位则继续领取，仍完成则按既有语义发完成通知
+        if (IsLoggedIn && State is RunState.Idle or RunState.Done)
         {
-            DiagLog.Info("收到到点领取信号，由本实例代跑");
+            DiagLog.Info(State == RunState.Done
+                ? "收到到点领取信号：上次领取已完成，将重新同步当日进度后继续"
+                : "收到到点领取信号，由本实例代跑");
             _ = RunScheduledClaimAsync();
         }
         else

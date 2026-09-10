@@ -127,7 +127,7 @@ public sealed class GlaccGameClient
     {
         try
         {
-            var device = _cred.DeviceOrDefault;
+            var device = _cred.Device;
             var headers = new Dictionary<string, string>
             {
                 ["appid"] = GlaccConstants.AppId,

@@ -1,24 +1,27 @@
 using System.IO;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace GlaccAuto.Core.Glacc;
 
 /// <summary>
-/// 用户级凭证与个人信息，持久化于 %APPDATA%\glacc-auto\credentials.json。
-/// 仅含用户数据：手机号、设备标识、账号 sub、token。官方常量见 <see cref="GlaccConstants"/>。
+/// 用户凭证与账号态，持久化于 %APPDATA%\glacc-auto\credentials.json。
+/// 落盘内容 = 装机盐（非个人信息）与用户数据（手机号、账号 sub、token）；
+/// 设备标识与设备档案由装机盐与手机号派生、不落盘，随手机号清空一并失效。
+/// 官方常量见 <see cref="GlaccConstants"/>。
 /// </summary>
 public sealed class GlaccCredentials
 {
-    /// <summary>手机号（登录用，"+86 12xxxxxxxxx" 格式）</summary>
+    /// <summary>手机号（登录用，"12xxxxxxxxx" 格式）</summary>
     public string Phone { get; set; } = "";
 
-    /// <summary>登录域设备 ID（32 位 hex，captcha meta 与 auth 请求头）</summary>
-    public string DeviceId { get; set; } = "";
-
-    /// <summary>游戏域设备标识（32 位 hex，peerid / x-device-id / x-guid）</summary>
-    public string PeerId { get; set; } = "";
+    /// <summary>
+    /// 装机盐（32 位 hex）：首次运行时随机生成并持久化，仅参与设备标识派生，不含任何用户信息。
+    /// 退出登录不重置，使同一手机号在本机重登时复现同一套设备标识。
+    /// </summary>
+    public string InstallSalt { get; set; } = "";
 
     /// <summary>用户 ID（登录响应 sub）</summary>
     public string Sub { get; set; } = "";
@@ -35,15 +38,31 @@ public sealed class GlaccCredentials
     /// <summary>verification_id 签发时间（Unix 秒）</summary>
     public long VerificationIdAt { get; set; }
 
-    /// <summary>设备档案（UA 与 TLS 指纹来源）；登录发码时按手机号哈希分配并持久化</summary>
-    public GlaccDeviceProfile? Device { get; set; }
-
     [JsonIgnore] public bool HasToken => !string.IsNullOrEmpty(AccessToken);
     [JsonIgnore] public bool HasRefreshToken => !string.IsNullOrEmpty(RefreshToken);
     [JsonIgnore] public long JwtExpiresAt => ObtainedAt + ExpiresIn;
 
-    /// <summary>设备档案（未分配时回退池首档案，即真机抓包档案，不持久化）</summary>
-    [JsonIgnore] public GlaccDeviceProfile DeviceOrDefault => Device ?? GlaccDevicePool.Profiles[0];
+    /// <summary>
+    /// 登录域设备 ID（32 位 hex，captcha meta 与 auth 请求头）。
+    /// 由装机盐与手机号派生：同机同号恒定、换号或换机必不同，且无法由手机号反推。
+    /// </summary>
+    [JsonIgnore] public string DeviceId => DeriveHex("glacc-deviceid:");
+
+    /// <summary>游戏域设备标识（32 位 hex，peerid / x-device-id / x-guid），派生规则同 <see cref="DeviceId"/>。</summary>
+    [JsonIgnore] public string PeerId => DeriveHex("glacc-peerid:");
+
+    /// <summary>设备档案（UA 与 TLS 指纹来源）：按手机号哈希从内置池确定性选档，同号恒定、异号分散。</summary>
+    [JsonIgnore]
+    public GlaccDeviceProfile Device
+    {
+        get
+        {
+            var digits = PhoneDigits(Phone);
+            return digits.Length == 11
+                ? GlaccDevicePool.SelectForPhone(digits)
+                : GlaccDevicePool.Profiles[0];
+        }
+    }
 
     /// <summary>JWT 是否仍有效（留 60s 余量）</summary>
     [JsonIgnore]
@@ -65,7 +84,7 @@ public sealed class GlaccCredentials
                     File.ReadAllText(FilePath), GlaccJsonContext.Default.GlaccCredentials);
                 if (loaded is not null)
                 {
-                    loaded.EnsureDeviceIds();
+                    loaded.EnsureInstallSalt();
                     return loaded;
                 }
             }
@@ -75,7 +94,7 @@ public sealed class GlaccCredentials
             // 凭证文件损坏时回退全新凭证
         }
         var fresh = new GlaccCredentials();
-        fresh.EnsureDeviceIds();
+        fresh.EnsureInstallSalt();
         return fresh;
     }
 
@@ -94,12 +113,14 @@ public sealed class GlaccCredentials
     }
 
     /// <summary>
-    /// 退出登录：清空会话态（访问令牌、刷新令牌与进行中的短信登录），
-    /// 保留手机号、设备标识与设备档案，使同一账号重新登录时沿用原设备指纹。
+    /// 退出登录：清空手机号、账号 ID、令牌与进行中的短信登录。
+    /// 设备标识与设备档案由装机盐与手机号派生、不落盘，随手机号清空一并失效。
     /// 不含持久化，调用方按需再存盘。
     /// </summary>
     public void ClearSession()
     {
+        Phone = "";
+        Sub = "";
         AccessToken = "";
         RefreshToken = "";
         ObtainedAt = 0;
@@ -108,25 +129,24 @@ public sealed class GlaccCredentials
         VerificationIdAt = 0;
     }
 
-    /// <summary>首次使用时生成本机随机设备标识（32 位 hex）。</summary>
-    public void EnsureDeviceIds()
+    /// <summary>首次使用时生成装机盐（32 位 hex）并落盘。</summary>
+    public void EnsureInstallSalt()
     {
-        if (string.IsNullOrEmpty(DeviceId)) DeviceId = NewHex32();
-        if (string.IsNullOrEmpty(PeerId)) PeerId = NewHex32();
+        if (!string.IsNullOrEmpty(InstallSalt)) return;
+        InstallSalt = NewHex32();
+        Save();
     }
 
     /// <summary>
-    /// 确保已分配设备档案：无则按手机号哈希从内置池确定性选档并持久化
-    /// （同一手机号永远同一档案；池更新也不影响已分配账号）。
+    /// 派生 32 位 hex 设备标识：材料 = 装机盐 + 手机号（尚无有效手机号时只用装机盐，
+    /// 保证标识始终非空且同机恒定）；域前缀使 DeviceId 与 PeerId 互相独立。
     /// </summary>
-    public void EnsureDevice()
+    private string DeriveHex(string domain)
     {
-        if (Device is not null) return;
         var digits = PhoneDigits(Phone);
-        Device = digits.Length == 11
-            ? GlaccDevicePool.SelectForPhone(digits)
-            : GlaccDevicePool.Profiles[0];
-        Save();
+        var material = digits.Length == 11 ? $"{InstallSalt}:{digits}" : InstallSalt;
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(domain + material));
+        return Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant();
     }
 
     private static string PhoneDigits(string phone)

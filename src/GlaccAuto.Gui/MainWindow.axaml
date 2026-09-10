@@ -149,7 +149,7 @@
         <StackPanel>
           <TextBlock Text="退出登录" FontSize="20" FontWeight="SemiBold"
                      Foreground="{DynamicResource TextPrimaryBrush}"/>
-          <TextBlock Text="退出后需重新用短信验证码登录，确定退出吗？"
+          <TextBlock Text="退出后将清除本机保存的手机号与登录信息，需重新用短信验证码登录。"
                      FontSize="14" Margin="0,8,0,0" TextWrapping="Wrap"
                      Foreground="{DynamicResource TextSecondaryBrush}"/>
           <StackPanel Orientation="Horizontal" Spacing="8"

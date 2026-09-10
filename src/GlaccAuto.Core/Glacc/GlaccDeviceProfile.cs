@@ -22,7 +22,7 @@ public sealed class GlaccDeviceProfile
 
 /// <summary>
 /// 内置真实设备档案池（小米/Redmi 系为主，命名与官方 UA 规则一致）。
-/// 登录时按手机号哈希确定性选档：同号恒定、异号分散；分配结果持久化进 credentials.json。
+/// 按手机号哈希确定性选档：同号恒定、异号分散。选档结果不持久化，每次按当前手机号重算。
 /// </summary>
 public static class GlaccDevicePool
 {

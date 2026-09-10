@@ -2,7 +2,7 @@ namespace GlaccAuto.Core.Glacc;
 
 /// <summary>
 /// 官方客户端常量。
-/// 用户个人信息（手机号/token/设备标识）在 <see cref="GlaccCredentials"/>，持久化于本机 %APPDATA%。
+/// 用户个人信息（手机号/token/账号 ID）在 <see cref="GlaccCredentials"/>，持久化于本机 %APPDATA%。
 /// </summary>
 public static class GlaccConstants
 {
@@ -26,8 +26,8 @@ public static class GlaccConstants
     public const string PackageName = "glacc";
     public const int MasterTaskId = 52; // 主任务「移动端-点广告得时长」
 
-    // UA 不写死：由 GlaccUa 模板 + 设备档案（credentials.json）生成，
-    // 登录时按手机号哈希从 GlaccDevicePool 确定性选档，避免全局同一设备指纹。
+    // UA 不写死：由 GlaccUa 模板 + 设备档案生成，
+    // 档案按手机号哈希从 GlaccDevicePool 确定性选档，避免全局同一设备指纹。
 
     // ── 服务端业务码（实测所得）──
     /// <summary>登录校验失败：JWT 无效/过期/缺失。HTTP 仍为 200，仅 body.code 区分（钱包与 push 已实测）。</summary>

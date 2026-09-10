@@ -24,6 +24,9 @@ public sealed class GlaccAuthClient
         var phone = NormalizePhone(phoneInput);
         if (phone is null) return GlaccResult.Fail("手机号格式不正确（应为 11 位大陆手机号）");
 
+        // 设备标识与设备档案由手机号派生，captcha 请求起就要用：先定下当前登录目标
+        _cred.Phone = phone;
+
         var captcha = await CaptchaInitAsync("POST:/v1/auth/verification", phone, ct);
         if (captcha is null)
         {
@@ -53,8 +56,6 @@ public sealed class GlaccAuthClient
             DiagLog.Warn($"发送验证码失败：{msg}");
             return GlaccResult.Fail($"发送验证码失败：{msg}");
         }
-        _cred.Phone = phone;
-        _cred.EnsureDevice();
         _cred.VerificationId = vid.GetString() ?? "";
         _cred.VerificationIdAt = GlaccCredentials.NowSeconds();
         _cred.Save();
@@ -218,7 +219,7 @@ public sealed class GlaccAuthClient
     {
         try
         {
-            var device = _cred.DeviceOrDefault;
+            var device = _cred.Device;
             var headers = new Dictionary<string, string>
             {
                 ["x-device-id"] = _cred.DeviceId,

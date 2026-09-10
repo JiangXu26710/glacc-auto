@@ -870,8 +870,8 @@ public partial class MainWindowViewModel : ViewModelBase
     private void CancelLogout() => ShowLogoutConfirm = false;
 
     /// <summary>
-    /// 确认退出登录：清除本地令牌并回到未登录状态；手机号、设备标识与设备档案保留，
-    /// 重新登录时预填原手机号、沿用原设备指纹。
+    /// 确认退出登录：清除本机保存的手机号、账号 ID 与令牌，回到未登录状态。
+    /// 设备标识与设备档案由手机号派生、不落盘，同一手机号重登时自动复现，无需另行保存。
     /// </summary>
     [RelayCommand]
     private void ConfirmLogout()
@@ -892,7 +892,7 @@ public partial class MainWindowViewModel : ViewModelBase
         BalanceHint = "";
         BalanceMinutes = 0;
         ClearStatus();
-        DiagLog.Info("已退出登录：本地会话已清除，手机号与设备标识保留");
+        DiagLog.Info("已退出登录：本机账号信息已清除");
     }
 
     // ── 登录引导（真实流程：手机号 + 短信验证码）──

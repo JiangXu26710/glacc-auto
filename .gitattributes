@@ -1,0 +1,28 @@
+# 换行符：仓库内统一按 LF 存储，检出时的换行由各平台 Git 配置决定
+# （Windows 上 core.autocrlf=true 即检出为 CRLF，与本地编辑器一致）
+* text=auto
+
+# 文本文件（显式声明，避免被误判为二进制）
+*.cs        text
+*.csproj    text
+*.slnx      text
+*.axaml     text
+*.xaml      text
+*.manifest  text
+*.md        text
+*.ps1       text
+*.json      text
+*.yml       text
+LICENSE     text
+NOTICE      text
+
+# 二进制文件（跳过换行转换与文本 diff）
+*.dll  binary
+*.exe  binary
+*.zip  binary
+*.png  binary
+*.ico  binary
+*.ttf  binary
+
+# 语言统计
+*.slnx linguist-generated=true

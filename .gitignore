@@ -4,13 +4,6 @@ obj/
 .venv/
 *.user
 dist/
-package.ps1
-
-# ── 逆向/抓包归档（本地保留，不入库）──
-_reverse/
-
-# ── 敏感凭据（后续移植主项目前同样不入库）──
-scripts/auth.json
 
 # ── IDE / 工具 ──
 .vs/
